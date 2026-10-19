@@ -1,0 +1,7 @@
+.error-boundary { max-width: 520px; margin: 12vh auto 0; padding: 28px 24px; background: var(--panel, #fff); color: var(--ink, #1d2824); border: 1px solid var(--line, #e4e9e3); border-radius: 8px; }
+.error-boundary h1 { margin: 0 0 8px; font-size: 22px; }
+.error-boundary p { margin: 0 0 14px; line-height: 1.5; }
+.error-boundary pre { margin: 0 0 18px; padding: 10px; overflow-x: auto; white-space: pre-wrap; font-size: 12px; background: rgba(127, 127, 127, .12); border-radius: 4px; }
+.error-boundary-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.error-boundary-actions button { min-height: 40px; padding: 0 16px; border-radius: 6px; border: 1px solid var(--green, #146f55); background: var(--green, #146f55); color: #fff; font-weight: 600; }
+.error-boundary-actions button + button { background: transparent; color: var(--green, #146f55); }
