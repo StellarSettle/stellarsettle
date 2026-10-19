@@ -73,6 +73,94 @@ app.get("/api/health", async () => ({
   lastScannedLedger: lastScannedLedger ?? null,
 }));
 
+// #52: GET /api/shipments/:id/fees endpoint (must come before /api/shipments to avoid route collision)
+app.get<{ Params: { shipmentId: string } }>("/api/shipments/:shipmentId/fees", async (request, reply) => {
+  if (!config.STELLAR_CONTRACT_ID) {
+    return reply.code(503).send({ error: "contract_not_configured" });
+  }
+
+  const { shipmentId } = request.params;
+
+  try {
+    // In production, this would fetch shipment and fee data from contract
+    // For now, return the endpoint structure
+    return {
+      shipmentId,
+      platformFeeBps: 0,
+      platformFee: 0,
+      arbiterFeeBps: 0,
+      logisticsFeeBps: 0,
+      buyerCancelFeeBps: 0,
+      disputeBondAmount: 0,
+      disputeBondBps: 0,
+      note: "contract_query_endpoint_ready_for_rpc_integration",
+    };
+  } catch (error) {
+    app.log.error({ err: error }, "Failed to fetch shipment fees");
+    return reply.code(500).send({ error: "fees_query_failed" });
+  }
+});
+
+// #49: Role-indexed shipment list endpoints
+app.get<{ Querystring: { role?: string; address?: string; cursor?: string; limit?: string; tag?: string } }>(
+  "/api/shipments",
+  async (request, reply) => {
+    if (!config.STELLAR_CONTRACT_ID) {
+      return reply.code(503).send({ error: "contract_not_configured" });
+    }
+
+    const { role, address, cursor, limit, tag } = request.query;
+    
+    if (!role) {
+      return reply.code(400).send({ error: "role parameter is required (supplier|buyer|arbiter|logistics|jurisdiction)" });
+    }
+
+    if (role !== "jurisdiction" && !address) {
+      return reply.code(400).send({ error: "address parameter is required for this role" });
+    }
+
+    if (role === "jurisdiction" && !tag) {
+      return reply.code(400).send({ error: "tag parameter is required for jurisdiction role" });
+    }
+
+    const pageSize = Math.min(100, Math.max(1, Number(limit ?? 50) || 50));
+    const pageOffset = Math.max(0, Number(cursor ?? 0) || 0);
+
+    try {
+      let shipmentIds: string[] = [];
+
+      if (role === "jurisdiction" && tag) {
+        // For jurisdiction queries, return from database or indicate not cached
+        // In production, would query the contract or cache layer
+        return {
+          shipmentIds: [],
+          cursor: null,
+          limit: pageSize,
+          total: 0,
+          note: "jurisdiction_queries_not_yet_cached",
+        };
+      } else if (["supplier", "buyer", "arbiter", "logistics"].includes(role) && address) {
+        // For now, return empty result indicating these would query the contract
+        // In production, this would invoke RPC to query contract storage or call contract methods
+        return {
+          role,
+          address,
+          shipmentIds: [],
+          cursor: null,
+          limit: pageSize,
+          total: 0,
+          note: "contract_query_endpoint_ready_for_rpc_integration",
+        };
+      }
+
+      return reply.code(400).send({ error: "invalid_parameters" });
+    } catch (error) {
+      app.log.error({ err: error }, "Failed to fetch shipments");
+      return reply.code(500).send({ error: "shipment_query_failed" });
+    }
+  }
+);
+
 app.get<{ Querystring: { after?: string; limit?: string } }>("/api/events", async (request) => {
   const after = Math.max(0, Number(request.query.after ?? 0) || 0);
   const limit = Math.min(100, Math.max(1, Number(request.query.limit ?? 50) || 50));
