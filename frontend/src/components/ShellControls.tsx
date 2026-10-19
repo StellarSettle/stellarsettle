@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { applyTheme, getInitialTheme, useTheme } from "../hooks/useTheme";
 import "../theme.css";
 import "../responsive.css";
+import "../a11y.css";
 
 applyTheme(getInitialTheme());
 
