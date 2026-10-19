@@ -196,98 +196,85 @@ async function readContractValue(contractId: string, method: string, args: xdr.S
   const account = await rpcServer.getAccount(
     (await rpcServer.getLatestLedger()).sequence.toString(),
   ).catch(() => undefined);
-  void account;
-  const simulation = await rpcServer.simulateTransaction(
-    new (await import("@stellar/stellar-sdk")).TransactionBuilder(
-      new (await import("@stellar/stellar-sdk")).Account(
-        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-        "0",
-      ),
-      { fee: "100", networkPassphrase: config.STELLAR_NETWORK === "mainnet" ? "Public Global Stellar Network ; September 2015" : "Test SDF Network ; September 2015" },
-    )
-      .addOperation(operation)
-      .setTimeout(30)
-      .build(),
-  );
+  if (!account) {
+    throw new Error("unable to resolve source account for contract read");
+  }
+  const transaction = new (await import("@stellar/stellar-sdk")).TransactionBuilder(account, {
+    fee: "100",
+    networkPassphrase: config.STELLAR_NETWORK === "mainnet"
+      ? "Public Global Stellar Network ; September 2015"
+      : "Test SDF Network ; September 2015",
+  })
+    .addOperation(operation)
+    .setTimeout(30)
+    .build();
+  const simulation = await rpcServer.simulateTransaction(transaction);
   if (rpc.Api.isSimulationError(simulation)) {
     throw new Error(simulation.error);
   }
-  const result = simulation.result?.retval;
-  return result ? decodeScVal(result) : null;
+  const result = (simulation as rpc.Api.SimulateTransactionSuccessResponse).result;
+  return result ? decodeScVal(result.retval) : null;
 }
 
-async function scanEvents(): Promise<void> {
-  if (pollRunning || !config.STELLAR_CONTRACT_ID) return;
+async function pollContractEvents(): Promise<void> {
+  if (!config.STELLAR_CONTRACT_ID || pollRunning) {
+    return;
+  }
   pollRunning = true;
   try {
-    const latestLedger = (await rpcServer.getLatestLedger()).sequence;
-    if (lastScannedLedger === undefined) {
-      lastScannedLedger = Math.max(1, latestLedger - 10);
-    }
-    const startLedger = Math.max(1, lastScannedLedger + 1);
-    if (startLedger > latestLedger) {
-      rpcHealthy = true;
-      return;
-    }
-    const filters = [{ type: "contract" as const, contractIds: [config.STELLAR_CONTRACT_ID] }];
-    let cursor: string | undefined;
-    let hasMore = true;
-    while (hasMore) {
-      const page = cursor
-        ? await rpcServer.getEvents({ cursor, filters, limit: 100 })
-        : await rpcServer.getEvents({ startLedger, endLedger: latestLedger, filters, limit: 100 });
-
-      for (const event of page.events) {
-        const topics = event.topic.map((topic) => decodeScVal(topic));
-        if (topics[0] !== "dispute_escalated") continue;
-        const payload = decodeScVal(event.value);
-        if (!Array.isArray(payload) || payload.length < 3) continue;
-        const numbers = payload.slice(0, 3).map(Number);
-        if (numbers.some((number) => !Number.isFinite(number))) continue;
-        const [milestoneIndex, openedLedger, currentLedger] = numbers as [number, number, number];
-        const parsed: EscalationEvent = {
-          id: event.id,
-          ledger: event.ledger,
-          type: "dispute_escalated",
-          shipmentId: String(topics[1] ?? ""),
-          milestoneIndex,
-          openedLedger,
-          currentLedger,
-        };
-        const inserted = database.prepare(`
-          INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(parsed.id, parsed.ledger, parsed.type, parsed.shipmentId, JSON.stringify(parsed));
-        if (Number(inserted.changes) > 0) streams.forEach((write) => write(parsed));
-      }
-
-      hasMore = page.events.length === 100 && page.cursor !== cursor;
-      cursor = page.cursor;
-    }
-
-    lastScannedLedger = latestLedger;
+    const latest = await rpcServer.getLatestLedger();
+    const startLedger = lastScannedLedger ?? Math.max(1, latest.sequence - 100);
+    const response = await rpcServer.getEvents({
+      startLedger,
+      filters: [{ type: "contract", contractIds: [config.STELLAR_CONTRACT_ID] }],
+      limit: 100,
+    });
     rpcHealthy = true;
+    for (const event of response.events) {
+      const payload = decodeScVal(event.value) as Record<string, unknown>;
+      const shipmentId = String(payload.shipmentId ?? payload.shipment_id ?? "");
+      const escalation: EscalationEvent = {
+        id: event.id,
+        ledger: event.ledger,
+        type: "dispute_escalated",
+        shipmentId,
+        milestoneIndex: Number(payload.milestoneIndex ?? payload.milestone_index ?? 0),
+        openedLedger: Number(payload.openedLedger ?? payload.opened_ledger ?? event.ledger),
+        currentLedger: event.ledger,
+      };
+      database.prepare(`
+        INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(escalation.id, escalation.ledger, escalation.type, shipmentId, JSON.stringify(escalation));
+      for (const stream of streams) {
+        stream(escalation);
+      }
+    }
+    lastScannedLedger = latest.sequence;
   } catch (error) {
     rpcHealthy = false;
-    app.log.error({ err: error }, "Soroban RPC event poll failed");
+    app.log.error({ err: error }, "contract event poll failed");
   } finally {
     pollRunning = false;
   }
 }
 
 if (config.STELLAR_CONTRACT_ID) {
-  await scanEvents();
-  pollTimer = setInterval(() => void scanEvents(), config.POLL_INTERVAL_MS);
+  pollTimer = setInterval(() => {
+    void pollContractEvents();
+  }, config.POLL_INTERVAL_MS);
+  void pollContractEvents();
 }
 
-app.addHook("onClose", async () => {
-  if (pollTimer) clearInterval(pollTimer);
+async function shutdown(): Promise<void> {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+  }
+  await app.close();
   database.close();
-});
-
-try {
-  await app.listen({ host: config.HOST, port: config.PORT });
-} catch (error) {
-  app.log.error(error);
-  process.exit(1);
 }
+
+process.on("SIGINT", () => void shutdown());
+process.on("SIGTERM", () => void shutdown());
+
+await app.listen({ host: config.HOST, port: config.PORT });
