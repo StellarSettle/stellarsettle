@@ -4,7 +4,7 @@ import Fastify from "fastify";
 import { DatabaseSync } from "node:sqlite";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
-import { scValToNative, rpc, xdr } from "@stellar/stellar-sdk";
+import { scValToNative, rpc, xdr, Address, Contract, nativeToScVal } from "@stellar/stellar-sdk";
 import { z } from "zod";
 
 const envSchema = z.object({
@@ -13,6 +13,7 @@ const envSchema = z.object({
   STELLAR_NETWORK: z.enum(["testnet", "mainnet"]).default("testnet"),
   STELLAR_RPC_URL: z.string().url().default("https://soroban-testnet.stellar.org"),
   STELLAR_CONTRACT_ID: z.string().default(""),
+  LOAN_MANAGER_CONTRACT_ID: z.string().default(""),
   START_LEDGER: z.coerce.number().int().nonnegative().optional(),
   POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
   DATABASE_PATH: z.string().default("./data/stellarsettle.sqlite"),
@@ -43,6 +44,14 @@ database.exec(`
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (shipment_id, metadata_key)
   );
+  CREATE TABLE IF NOT EXISTS loan_liquidations (
+    id TEXT PRIMARY KEY,
+    ledger INTEGER NOT NULL,
+    borrower TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  );
+  CREATE INDEX IF NOT EXISTS loan_liquidations_ledger_idx ON loan_liquidations(ledger DESC);
 `);
 
 type EscalationEvent = {
@@ -81,6 +90,52 @@ app.get<{ Querystring: { after?: string; limit?: string } }>("/api/events", asyn
     FROM contract_events WHERE ledger > ? ORDER BY ledger DESC LIMIT ?
   `).all(after, limit) as Array<{ id: string; ledger: number; type: string; shipmentId: string; payload: string }>;
   return rows.map((row) => JSON.parse(row.payload));
+});
+
+app.get<{ Querystring: { after?: string; limit?: string } }>("/api/lending/liquidations", async (request) => {
+  const after = Math.max(0, Number(request.query.after ?? 0) || 0);
+  const limit = Math.min(100, Math.max(1, Number(request.query.limit ?? 50) || 50));
+  const rows = database.prepare(`
+    SELECT id, ledger, borrower, payload
+    FROM loan_liquidations WHERE ledger > ? ORDER BY ledger DESC LIMIT ?
+  `).all(after, limit) as Array<{ id: string; ledger: number; borrower: string; payload: string }>;
+  return rows.map((row) => JSON.parse(row.payload));
+});
+
+app.get<{ Params: { address: string } }>("/api/lending/positions/:address", async (request, reply) => {
+  const { address } = request.params;
+  if (!config.LOAN_MANAGER_CONTRACT_ID) {
+    return reply.code(503).send({ error: "loan_manager_not_configured" });
+  }
+  try {
+    Address.fromString(address);
+  } catch {
+    return reply.code(400).send({ error: "invalid_address" });
+  }
+  try {
+    const position = await readContractValue(
+      config.LOAN_MANAGER_CONTRACT_ID,
+      "get_position",
+      [new Address(address).toScVal()],
+    );
+    return { address, position: position ?? null };
+  } catch (error) {
+    app.log.error({ err: error }, "loan_manager get_position read failed");
+    return reply.code(502).send({ error: "rpc_read_failed" });
+  }
+});
+
+app.get("/api/lending/pool", async (_request, reply) => {
+  if (!config.LOAN_MANAGER_CONTRACT_ID) {
+    return reply.code(503).send({ error: "loan_manager_not_configured" });
+  }
+  try {
+    const pool = await readContractValue(config.LOAN_MANAGER_CONTRACT_ID, "get_pool_state", []);
+    return { pool: pool ?? null };
+  } catch (error) {
+    app.log.error({ err: error }, "loan_manager get_pool_state read failed");
+    return reply.code(502).send({ error: "rpc_read_failed" });
+  }
 });
 
 app.get<{ Params: { shipmentId: string } }>("/api/metadata/:shipmentId", async (request) => {
@@ -133,6 +188,32 @@ app.get("/api/stream", async (request, reply) => {
 
 function decodeScVal(value: xdr.ScVal): unknown {
   return scValToNative(value) as unknown;
+}
+
+async function readContractValue(contractId: string, method: string, args: xdr.ScVal[]): Promise<unknown> {
+  const contract = new Contract(contractId);
+  const operation = contract.call(method, ...args);
+  const account = await rpcServer.getAccount(
+    (await rpcServer.getLatestLedger()).sequence.toString(),
+  ).catch(() => undefined);
+  void account;
+  const simulation = await rpcServer.simulateTransaction(
+    new (await import("@stellar/stellar-sdk")).TransactionBuilder(
+      new (await import("@stellar/stellar-sdk")).Account(
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        "0",
+      ),
+      { fee: "100", networkPassphrase: config.STELLAR_NETWORK === "mainnet" ? "Public Global Stellar Network ; September 2015" : "Test SDF Network ; September 2015" },
+    )
+      .addOperation(operation)
+      .setTimeout(30)
+      .build(),
+  );
+  if (rpc.Api.isSimulationError(simulation)) {
+    throw new Error(simulation.error);
+  }
+  const result = simulation.result?.retval;
+  return result ? decodeScVal(result) : null;
 }
 
 async function scanEvents(): Promise<void> {
@@ -208,5 +289,5 @@ try {
   await app.listen({ host: config.HOST, port: config.PORT });
 } catch (error) {
   app.log.error(error);
-  process.exitCode = 1;
+  process.exit(1);
 }
