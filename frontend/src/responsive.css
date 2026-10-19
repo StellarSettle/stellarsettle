@@ -1,0 +1,25 @@
+/* Mobile audit fixes: sidebar becomes a toggleable drawer below 768px. */
+html, body { overflow-x: hidden; }
+img, svg { max-width: 100%; }
+.page-content, .main-area, .table-panel { min-width: 0; }
+.table-panel { overflow-x: auto; }
+
+@media (max-width: 767px) {
+  .app-shell { padding-bottom: 0; }
+  .sidebar { top: 0; right: auto; bottom: 0; left: 0; width: min(280px, 85vw); height: 100vh; padding: 22px 14px 13px; flex-direction: column; align-items: stretch; border-top: 0; border-right: 1px solid var(--line); overflow-y: auto; transform: translateX(-102%); transition: transform .2s ease; z-index: 40; visibility: hidden; }
+  html[data-nav-open] .sidebar { transform: none; visibility: visible; }
+  .brand, .workspace-switch, .nav-label, .sidebar-bottom { display: flex; }
+  .primary-nav { display: flex; flex-direction: column; gap: 2px; }
+  .nav-item { justify-content: flex-start; gap: 10px; min-height: 44px; padding: 0 10px; font-size: 13px; }
+  .nav-item svg { width: 17px; }
+  .nav-toggle { display: inline-flex; align-items: center; }
+  .shell-controls { top: 8px; bottom: auto; left: 8px; right: 8px; justify-content: space-between; pointer-events: none; }
+  .shell-controls > * { pointer-events: auto; }
+  .nav-backdrop { position: fixed; inset: 0; z-index: 35; background: rgba(0, 0, 0, .45); }
+  html[data-nav-open] .shell-controls { z-index: 50; }
+  .topbar { padding-left: 120px; padding-right: 15px; }
+  .breadcrumbs { display: none; }
+  .top-actions { margin-left: auto; }
+  .icon-button, .wallet-button, .nav-count { min-width: 40px; min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) { .sidebar { transition: none; } }
