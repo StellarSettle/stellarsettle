@@ -252,3 +252,25 @@ td { height: 53px; padding: 0 15px; border-top: 1px solid #edf0ed; color: #59645
   .primary-button { padding: 0 9px; }
   .detail-footer { align-items: flex-start; flex-direction: column; }
 }
+/* Pagination */
+.pagination { display: flex; align-items: center; justify-content: flex-end; gap: 10px; padding: 10px 17px; border-top: 1px solid #edf0ed; font-size: 11px; color: #77817a; }
+.page-button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); color: var(--ink); font: inherit; cursor: pointer; }
+.page-button:disabled { opacity: 0.45; cursor: not-allowed; }
+.page-button:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+/* Loading skeletons */
+.skeleton { display: block; border-radius: 4px; background: linear-gradient(90deg, #eef1ee 25%, #f6f8f6 37%, #eef1ee 63%); background-size: 400% 100%; animation: skeleton-shimmer 1.4s ease infinite; }
+.metric-top .skeleton, .shipment-ref .skeleton, .event-copy .skeleton, .detail-grid .skeleton { margin-bottom: 5px; }
+@keyframes skeleton-shimmer { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
+@media (prefers-reduced-motion: reduce) { .skeleton { animation: none; } }
+
+/* Global shipment search */
+.global-search { position: relative; flex: 1; max-width: 340px; margin: 0 16px; }
+.global-search .search-input-wrap { width: 100%; }
+.search-results { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; margin: 0; padding: 4px; list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08); }
+.search-results button { display: flex; flex-direction: column; align-items: flex-start; width: 100%; padding: 7px 9px; border: 0; border-radius: 5px; background: none; text-align: left; font: inherit; cursor: pointer; }
+.search-results button:hover, .search-results button:focus-visible { background: #f2f5f2; outline: none; }
+.search-results small { color: #88918b; font-size: 10px; }
+.search-empty { position: absolute; z-index: 20; top: calc(100% + 4px); left: 0; right: 0; padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 7px; color: #77817a; font-size: 11px; }
+.search-error { color: var(--coral, #c4553f); }
+@media (max-width: 720px) { .global-search { display: none; } }

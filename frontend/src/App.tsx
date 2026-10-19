@@ -18,6 +18,11 @@ import {
   WalletCards,
   X,
 } from "lucide-react";
+import { Pagination } from "./components/Pagination";
+import { ShipmentSearch } from "./components/ShipmentSearch";
+import { EventListSkeleton, MetricSkeleton, ShipmentDetailSkeleton } from "./components/Skeleton";
+import { usePagination } from "./hooks/usePagination";
+import { backendUrl } from "./lib/api";
 import { appNetwork, configuredContractId, connectWallet, getShipmentSummary, setShipmentMetadata, type Shipment, type Wallet } from "./lib/stellar";
 
 type Escalation = {
@@ -30,7 +35,9 @@ type Escalation = {
   currentLedger: number;
 };
 
-const backendUrl = (import.meta.env.VITE_BACKEND_URL || "http://localhost:8787").replace(/\/$/, "");
+export const TABLE_PAGE_SIZE = 5;
+export const EVENT_PAGE_SIZE = 4;
+const EVENT_FETCH_LIMIT = 24;
 
 function shortAddress(address: string) {
   return `${address.slice(0, 5)}...${address.slice(-5)}`;
@@ -49,7 +56,9 @@ function App() {
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [shipmentId, setShipmentId] = useState("");
   const [shipment, setShipment] = useState<Shipment | null>(null);
+  const [viewed, setViewed] = useState<Shipment[]>([]);
   const [events, setEvents] = useState<Escalation[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
   const [apiState, setApiState] = useState<"checking" | "online" | "offline">("checking");
   const [loading, setLoading] = useState(false);
   const [writing, setWriting] = useState(false);
@@ -58,6 +67,8 @@ function App() {
   const [showMetadata, setShowMetadata] = useState(false);
   const [metadataKey, setMetadataKey] = useState("");
   const [metadataValue, setMetadataValue] = useState("");
+  const viewedPages = usePagination(viewed, TABLE_PAGE_SIZE);
+  const eventPages = usePagination(events, EVENT_PAGE_SIZE);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -67,14 +78,15 @@ function App() {
         setApiState("online");
       })
       .catch(() => setApiState("offline"));
-    fetch(`${backendUrl}/api/events?limit=8`, { signal: controller.signal })
+    fetch(`${backendUrl}/api/events?limit=${EVENT_FETCH_LIMIT}`, { signal: controller.signal })
       .then((response) => response.ok ? response.json() as Promise<Escalation[]> : [])
       .then(setEvents)
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => { if (!controller.signal.aborted) setEventsLoading(false); });
     const stream = new EventSource(`${backendUrl}/api/stream`);
     stream.addEventListener("dispute_escalated", (message) => {
       const event = JSON.parse((message as MessageEvent<string>).data) as Escalation;
-      setEvents((current) => [event, ...current.filter((item) => item.id !== event.id)].slice(0, 8));
+      setEvents((current) => [event, ...current.filter((item) => item.id !== event.id)].slice(0, EVENT_FETCH_LIMIT));
     });
     return () => {
       controller.abort();
@@ -92,20 +104,41 @@ function App() {
     }
   }
 
-  async function handleSearch(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!wallet || !shipmentId.trim()) return;
+  async function lookupShipment(id: string) {
+    if (!wallet || !id) return;
     setLoading(true);
     setError("");
     setNotice("");
     try {
-      setShipment(await getShipmentSummary(wallet.address, shipmentId.trim()));
+      const found = await getShipmentSummary(wallet.address, id);
+      setShipment(found);
+      setViewed((current) => [found, ...current.filter((item) => item.id !== found.id)]);
     } catch (cause) {
       setShipment(null);
       setError(cause instanceof Error ? cause.message : "Unable to load shipment.");
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleSearch(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void lookupShipment(shipmentId.trim());
+  }
+
+  function handleSearchSelect(id: string) {
+    setShipmentId(id);
+    if (wallet) void lookupShipment(id);
+    else setError("Connect your wallet to load the selected shipment.");
+  }
+
+  function refreshEvents() {
+    setEventsLoading(true);
+    fetch(`${backendUrl}/api/events?limit=${EVENT_FETCH_LIMIT}`)
+      .then((response) => response.json())
+      .then(setEvents)
+      .catch(() => setError("Could not refresh backend events."))
+      .finally(() => setEventsLoading(false));
   }
 
   async function handleMetadata(event: React.FormEvent<HTMLFormElement>) {
@@ -144,7 +177,7 @@ function App() {
         <div className="nav-label">WORKSPACE</div>
         <nav className="primary-nav" aria-label="Primary navigation">
           <a className="nav-item active" href="#overview"><LayoutDashboard size={17} />Overview</a>
-          <a className="nav-item" href="#shipment"><FileSearch size={17} />Shipments<span className="nav-count">{shipment ? "1" : "0"}</span></a>
+          <a className="nav-item" href="#shipment"><FileSearch size={17} />Shipments<span className="nav-count">{viewed.length}</span></a>
           <a className="nav-item" href="#activity"><Activity size={17} />Dispute activity{events.length > 0 && <span className="nav-count alert-count">{events.length}</span>}</a>
         </nav>
         <div className="sidebar-bottom">
@@ -164,6 +197,7 @@ function App() {
       <main className="main-area" id="overview">
         <header className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>Overview</strong></div>
+          <ShipmentSearch onSelect={handleSearchSelect} />
           <div className="top-actions">
             <span className={`backend-indicator ${apiState}`}><span />API {apiState === "online" ? "connected" : apiState === "offline" ? "offline" : "checking"}</span>
             <button className="icon-button notification-button" aria-label="Notifications"><Bell size={17} />{events.length > 0 && <i />}</button>
@@ -184,6 +218,7 @@ function App() {
           </section>
 
           <section className="metrics-grid" aria-label="Workspace status">
+            {loading ? <><MetricSkeleton /><MetricSkeleton /><MetricSkeleton /></> : <>
             <article className="metric metric-primary">
               <div className="metric-top"><span>Tracked shipment</span><span className="metric-icon green-icon"><FileSearch size={16} /></span></div>
               <div className="metric-value">{shipment ? shipment.id : "—"}</div>
@@ -199,6 +234,7 @@ function App() {
               <div className="metric-value">{shipment ? shipment.open_disputes : "—"}</div>
               <div className="metric-foot">{shipment ? "On tracked shipment" : "No shipment selected"}</div>
             </article>
+            </>}
             <article className="metric">
               <div className="metric-top"><span>Network status</span><span className="metric-icon amber-icon"><Activity size={16} /></span></div>
               <div className="metric-value status-metric">{apiState === "online" ? "Operational" : apiState === "offline" ? "Disconnected" : "Checking"}</div>
@@ -219,7 +255,7 @@ function App() {
                 <button className="primary-button" disabled={!wallet || loading || !shipmentId.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}{loading ? "Loading" : "Look up"}</button>
               </form>
               {!wallet && <div className="inline-callout"><WalletCards size={16} /><span>Connect Freighter to query public contract data and submit authorized transactions.</span><button onClick={handleConnect}>Connect</button></div>}
-              {shipment ? <div className="shipment-detail">
+              {loading ? <ShipmentDetailSkeleton /> : shipment ? <div className="shipment-detail">
                 <div className="detail-topline"><div className="shipment-ref"><span className="shipment-icon"><FileSearch size={18} /></span><span><strong>{shipment.id}</strong><small>Created at ledger {shipment.created_at.toLocaleString()}</small></span></div><span className={`status-pill ${status.toLowerCase()}`}><span />{status}</span></div>
                 <div className="detail-grid">
                   <div><span>ESCROW TOTAL</span><strong>{amount(shipment.total_amount)} <small>units</small></strong></div>
@@ -240,28 +276,29 @@ function App() {
             <section className="panel activity-panel" id="activity">
               <div className="panel-heading">
                 <div><div className="section-kicker">EVENT MONITOR</div><h2>Dispute activity</h2></div>
-                <button className="icon-button refresh-button" title="Refresh events" onClick={() => fetch(`${backendUrl}/api/events?limit=8`).then((response) => response.json()).then(setEvents).catch(() => setError("Could not refresh backend events."))}><RefreshCw size={16} /></button>
+                <button className="icon-button refresh-button" title="Refresh events" onClick={refreshEvents}><RefreshCw size={16} /></button>
               </div>
-              {events.length ? <div className="event-list">{events.map((event) => <article className="event-row" key={event.id}>
+              {eventsLoading ? <EventListSkeleton rows={EVENT_PAGE_SIZE} /> : events.length ? <><div className="event-list">{eventPages.pageItems.map((event) => <article className="event-row" key={event.id}>
                 <span className="event-mark"><ShieldCheck size={15} /></span>
                 <span className="event-copy"><strong>Dispute escalated</strong><small>{event.shipmentId} · Milestone {event.milestoneIndex + 1}</small></span>
                 <span className="event-ledger">L{event.ledger.toLocaleString()}</span>
-              </article>)}</div> : <div className="empty-events"><span className="empty-icon subtle-icon"><Bell size={21} /></span><strong>No escalation events</strong><span>New contract alerts will appear here in real time.</span></div>}
+              </article>)}</div><Pagination label="Dispute activity" page={eventPages.page} pageCount={eventPages.pageCount} onPageChange={eventPages.setPage} /></> : <div className="empty-events"><span className="empty-icon subtle-icon"><Bell size={21} /></span><strong>No escalation events</strong><span>New contract alerts will appear here in real time.</span></div>}
               <div className="activity-footer"><span className="stream-dot" />Listening for dispute_escalated<span className="stream-status">{apiState === "online" ? "Connected" : "Offline"}</span></div>
             </section>
           </div>
 
           <section className="panel table-panel">
             <div className="panel-heading table-heading">
-              <div><div className="section-kicker">RECENTLY VIEWED</div><h2>Shipment record</h2></div>
-              <button className="filter-button" onClick={() => { setShipment(null); setShipmentId(""); }}>Clear view <X size={14} /></button>
+              <div><div className="section-kicker">RECENTLY VIEWED</div><h2>Shipment records</h2></div>
+              <button className="filter-button" onClick={() => { setShipment(null); setShipmentId(""); setViewed([]); }}>Clear view <X size={14} /></button>
             </div>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>SHIPMENT</th><th>STATUS</th><th>ESCROW</th><th>MILESTONES</th><th>DISPUTES</th><th>CREATED LEDGER</th></tr></thead>
-                <tbody>{shipment ? <tr><td><span className="table-id"><span className="table-file"><FileSearch size={14} /></span>{shipment.id}</span></td><td><span className={`status-pill ${status.toLowerCase()}`}><span />{status}</span></td><td>{amount(shipment.total_amount)} <span className="muted">units</span></td><td>{shipment.milestone_count}</td><td>{shipment.open_disputes > 0 ? <span className="dispute-count">{shipment.open_disputes} open</span> : "None"}</td><td>{shipment.created_at.toLocaleString()}</td></tr> : <tr><td colSpan={6} className="table-empty">No shipment loaded. Search above to view a contract record.</td></tr>}</tbody>
+                <tbody>{viewedPages.pageItems.length ? viewedPages.pageItems.map((row) => <tr key={row.id}><td><span className="table-id"><span className="table-file"><FileSearch size={14} /></span>{row.id}</span></td><td><span className={`status-pill ${row.status.toLowerCase()}`}><span />{row.status}</span></td><td>{amount(row.total_amount)} <span className="muted">units</span></td><td>{row.milestone_count}</td><td>{row.open_disputes > 0 ? <span className="dispute-count">{row.open_disputes} open</span> : "None"}</td><td>{row.created_at.toLocaleString()}</td></tr>) : <tr><td colSpan={6} className="table-empty">No shipment loaded. Search above to view a contract record.</td></tr>}</tbody>
               </table>
             </div>
+            <Pagination label="Shipment records" page={viewedPages.page} pageCount={viewedPages.pageCount} onPageChange={viewedPages.setPage} />
           </section>
 
           <footer className="page-footer"><span>StellarSettle operations · Soroban contract interface</span><span><span className="footer-live" />{appNetwork} <span className="footer-sep">·</span> Contract {configuredContractId ? shortAddress(configuredContractId) : "not configured"}</span></footer>

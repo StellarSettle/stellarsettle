@@ -43,7 +43,32 @@ database.exec(`
     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (shipment_id, metadata_key)
   );
+  CREATE TABLE IF NOT EXISTS shipments (
+    shipment_id TEXT PRIMARY KEY,
+    buyer TEXT,
+    supplier TEXT,
+    last_ledger INTEGER
+  );
+  INSERT OR IGNORE INTO shipments (shipment_id, last_ledger)
+    SELECT shipment_id, MAX(ledger) FROM contract_events WHERE shipment_id IS NOT NULL AND shipment_id != '' GROUP BY shipment_id;
+  INSERT OR IGNORE INTO shipments (shipment_id) SELECT DISTINCT shipment_id FROM shipment_metadata;
 `);
+
+const shipmentAddressSchema = z.string().regex(/^[GC][A-Z2-7]{55}$/);
+const shipmentIndexSchema = z.object({
+  buyer: shipmentAddressSchema.optional(),
+  supplier: shipmentAddressSchema.optional(),
+});
+
+function indexShipment(shipmentId: string, fields: { buyer?: string; supplier?: string; ledger?: number } = {}) {
+  database.prepare(`
+    INSERT INTO shipments (shipment_id, buyer, supplier, last_ledger) VALUES (?, ?, ?, ?)
+    ON CONFLICT(shipment_id) DO UPDATE SET
+      buyer = COALESCE(excluded.buyer, shipments.buyer),
+      supplier = COALESCE(excluded.supplier, shipments.supplier),
+      last_ledger = MAX(COALESCE(excluded.last_ledger, 0), COALESCE(shipments.last_ledger, 0))
+  `).run(shipmentId, fields.buyer ?? null, fields.supplier ?? null, fields.ledger ?? null);
+}
 
 type EscalationEvent = {
   id: string;
@@ -83,6 +108,36 @@ app.get<{ Querystring: { after?: string; limit?: string } }>("/api/events", asyn
   return rows.map((row) => JSON.parse(row.payload));
 });
 
+app.get<{ Querystring: { q?: string; limit?: string } }>("/api/shipments/search", async (request, reply) => {
+  const query = (request.query.q ?? "").trim();
+  if (query.length < 2 || query.length > 128) {
+    return reply.code(400).send({ error: "query_must_be_2_to_128_chars" });
+  }
+  const limit = Math.min(50, Math.max(1, Number(request.query.limit ?? 10) || 10));
+  const pattern = `%${query.replace(/[\\%_]/g, (match) => `\\${match}`)}%`;
+  return database.prepare(`
+    SELECT shipment_id AS shipmentId, buyer, supplier, last_ledger AS lastLedger
+    FROM shipments
+    WHERE shipment_id LIKE ? ESCAPE '\\'
+       OR buyer LIKE ? ESCAPE '\\'
+       OR supplier LIKE ? ESCAPE '\\'
+    ORDER BY (shipment_id = ?) DESC, last_ledger DESC, shipment_id
+    LIMIT ?
+  `).all(pattern, pattern, pattern, query, limit);
+});
+
+app.put<{ Params: { shipmentId: string }; Body: unknown }>("/api/shipments/:shipmentId", async (request, reply) => {
+  if (!config.METADATA_API_KEY || request.headers["x-api-key"] !== config.METADATA_API_KEY) {
+    return reply.code(401).send({ error: "shipment_index_unauthorized" });
+  }
+  const parsed = shipmentIndexSchema.safeParse(request.body ?? {});
+  if (!request.params.shipmentId || !parsed.success) {
+    return reply.code(400).send({ error: "invalid_shipment_index" });
+  }
+  indexShipment(request.params.shipmentId, parsed.data);
+  return reply.code(204).send();
+});
+
 app.get<{ Params: { shipmentId: string } }>("/api/metadata/:shipmentId", async (request) => {
   const rows = database.prepare(`
     SELECT metadata_key AS key, value, updated_at AS updatedAt
@@ -108,6 +163,7 @@ app.put<{ Params: { shipmentId: string; key: string }; Body: { value?: unknown }
       ON CONFLICT(shipment_id, metadata_key)
       DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
     `).run(shipmentId, key, value);
+    indexShipment(shipmentId);
     return reply.code(204).send();
   },
 );
@@ -177,6 +233,7 @@ async function scanEvents(): Promise<void> {
           INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
           VALUES (?, ?, ?, ?, ?)
         `).run(parsed.id, parsed.ledger, parsed.type, parsed.shipmentId, JSON.stringify(parsed));
+        if (parsed.shipmentId) indexShipment(parsed.shipmentId, { ledger: parsed.ledger });
         if (Number(inserted.changes) > 0) streams.forEach((write) => write(parsed));
       }
 
