@@ -50,6 +50,9 @@ Deploying to Mainnet
 Security Considerations
 See detailed security model: docs/SECURITY.md
 Roadmap
+Contributing
+Code of Conduct
+License
 
 ---
 
@@ -2679,9 +2682,16 @@ Roadmap
 
 ---
 
-Contributing
-Pull requests welcome. Please run `cargo fmt` and `cargo test` before submitting.
-License
+## Contributing
+
+Pull requests welcome. Please run `cargo fmt` and `cargo test` before submitting. Contributors are expected to adhere to our [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Code of Conduct
+
+We are committed to providing an open, welcoming, and harassment-free community for everyone. Please review our [Code of Conduct](CODE_OF_CONDUCT.md) for participation guidelines and incident reporting instructions.
+
+## License
+
 MIT
 
 
