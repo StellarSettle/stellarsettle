@@ -55,8 +55,44 @@ type EscalationEvent = {
   currentLedger: number;
 };
 
+type MilestoneConfirmedEvent = {
+  id: string;
+  ledger: number;
+  type: "milestone_confirmed";
+  shipmentId: string;
+  milestoneIndex: number;
+  paymentAmount: bigint | number;
+};
+
+type ProofSubmittedEvent = {
+  id: string;
+  ledger: number;
+  type: "proof_submitted";
+  shipmentId: string;
+  milestoneIndex: number;
+  proofHash: string;
+};
+
+type DisputeResolvedEvent = {
+  id: string;
+  ledger: number;
+  type: "dispute_resolved";
+  shipmentId: string;
+  milestoneIndex: number;
+  outcome: "approved" | "rejected";
+};
+
+type ContractEvent = EscalationEvent | MilestoneConfirmedEvent | ProofSubmittedEvent | DisputeResolvedEvent;
+
+export const KNOWN_EVENT_TYPES = new Set([
+  "dispute_escalated",
+  "milestone_confirmed",
+  "proof_submitted",
+  "dispute_resolved",
+]);
+
 const app = Fastify({ logger: true });
-const streams = new Set<(event: EscalationEvent) => void>();
+const streams = new Set<(event: ContractEvent) => void>();
 const rpcServer = new rpc.Server(config.STELLAR_RPC_URL);
 let lastScannedLedger = config.START_LEDGER;
 let pollTimer: NodeJS.Timeout | undefined;
@@ -112,7 +148,19 @@ app.put<{ Params: { shipmentId: string; key: string }; Body: { value?: unknown }
   },
 );
 
-app.get("/api/stream", async (request, reply) => {
+app.get<{ Querystring: { types?: string } }>("/api/stream", async (request, reply) => {
+  const rawTypes = request.query.types;
+  let typeFilter: Set<string> | null = null;
+  if (rawTypes !== undefined && rawTypes !== "") {
+    const requested = rawTypes.split(",").map((t) => t.trim()).filter(Boolean);
+    for (const t of requested) {
+      if (!KNOWN_EVENT_TYPES.has(t)) {
+        return reply.code(400).send({ error: "unknown_event_type", type: t });
+      }
+    }
+    typeFilter = new Set(requested);
+  }
+
   reply.hijack();
   const response = reply.raw;
   response.writeHead(200, {
@@ -122,7 +170,10 @@ app.get("/api/stream", async (request, reply) => {
     "access-control-allow-origin": config.WEB_ORIGIN,
   });
   response.write(": connected\n\n");
-  const writeEvent = (event: EscalationEvent) => response.write(`id: ${event.id}\nevent: dispute_escalated\ndata: ${JSON.stringify(event)}\n\n`);
+  const writeEvent = (event: ContractEvent) => {
+    if (typeFilter !== null && !typeFilter.has(event.type)) return;
+    response.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+  };
   streams.add(writeEvent);
   const heartbeat = setInterval(() => response.write(": keepalive\n\n"), 20_000);
   request.raw.on("close", () => {
@@ -133,6 +184,56 @@ app.get("/api/stream", async (request, reply) => {
 
 function decodeScVal(value: xdr.ScVal): unknown {
   return scValToNative(value) as unknown;
+}
+
+export function decodeMilestoneConfirmed(
+  eventId: string,
+  ledger: number,
+  topics: unknown[],
+  _value: unknown,
+): MilestoneConfirmedEvent | null {
+  if (topics[0] !== "milestone_confirmed") return null;
+  const shipmentId = String(topics[1] ?? "");
+  const milestoneIndex = Number(topics[2]);
+  const paymentAmount = topics[3] as bigint | number;
+  if (!shipmentId || !Number.isFinite(milestoneIndex)) return null;
+  return { id: eventId, ledger, type: "milestone_confirmed", shipmentId, milestoneIndex, paymentAmount };
+}
+
+export function decodeProofSubmitted(
+  eventId: string,
+  ledger: number,
+  topics: unknown[],
+  value: unknown,
+): ProofSubmittedEvent | null {
+  if (topics[0] !== "proof_submitted") return null;
+  const shipmentId = String(topics[1] ?? "");
+  const milestoneIndex = Number(topics[2]);
+  const proofHash = String(value ?? topics[3] ?? "");
+  if (!shipmentId || !Number.isFinite(milestoneIndex)) return null;
+  return { id: eventId, ledger, type: "proof_submitted", shipmentId, milestoneIndex, proofHash };
+}
+
+export function decodeDisputeResolved(
+  eventId: string,
+  ledger: number,
+  topics: unknown[],
+  value: unknown,
+): DisputeResolvedEvent | null {
+  if (topics[0] !== "dispute_resolved") return null;
+  const shipmentId = String(topics[1] ?? "");
+  const milestoneIndex = Number(topics[2]);
+  const rawOutcome = topics[3] ?? value;
+  const approved = rawOutcome === true || rawOutcome === 1 || rawOutcome === "approved";
+  if (!shipmentId || !Number.isFinite(milestoneIndex)) return null;
+  return {
+    id: eventId,
+    ledger,
+    type: "dispute_resolved",
+    shipmentId,
+    milestoneIndex,
+    outcome: approved ? "approved" : "rejected",
+  };
 }
 
 async function scanEvents(): Promise<void> {
@@ -158,21 +259,33 @@ async function scanEvents(): Promise<void> {
 
       for (const event of page.events) {
         const topics = event.topic.map((topic) => decodeScVal(topic));
-        if (topics[0] !== "dispute_escalated") continue;
-        const payload = decodeScVal(event.value);
-        if (!Array.isArray(payload) || payload.length < 3) continue;
-        const numbers = payload.slice(0, 3).map(Number);
-        if (numbers.some((number) => !Number.isFinite(number))) continue;
-        const [milestoneIndex, openedLedger, currentLedger] = numbers as [number, number, number];
-        const parsed: EscalationEvent = {
-          id: event.id,
-          ledger: event.ledger,
-          type: "dispute_escalated",
-          shipmentId: String(topics[1] ?? ""),
-          milestoneIndex,
-          openedLedger,
-          currentLedger,
-        };
+        const value = decodeScVal(event.value);
+        let parsed: ContractEvent | null = null;
+
+        if (topics[0] === "dispute_escalated") {
+          if (!Array.isArray(value) || value.length < 3) continue;
+          const numbers = (value as unknown[]).slice(0, 3).map(Number);
+          if (numbers.some((n) => !Number.isFinite(n))) continue;
+          const [milestoneIndex, openedLedger, currentLedger] = numbers as [number, number, number];
+          parsed = {
+            id: event.id,
+            ledger: event.ledger,
+            type: "dispute_escalated",
+            shipmentId: String(topics[1] ?? ""),
+            milestoneIndex,
+            openedLedger,
+            currentLedger,
+          };
+        } else if (topics[0] === "milestone_confirmed") {
+          parsed = decodeMilestoneConfirmed(event.id, event.ledger, topics, value);
+        } else if (topics[0] === "proof_submitted") {
+          parsed = decodeProofSubmitted(event.id, event.ledger, topics, value);
+        } else if (topics[0] === "dispute_resolved") {
+          parsed = decodeDisputeResolved(event.id, event.ledger, topics, value);
+        }
+
+        if (!parsed) continue;
+
         const inserted = database.prepare(`
           INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
           VALUES (?, ?, ?, ?, ?)
