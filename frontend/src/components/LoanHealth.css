@@ -1,0 +1,8 @@
+.loan-health { border: 1px solid #8884; border-radius: 8px; padding: 12px; }
+.loan-health__bar { height: 10px; border-radius: 5px; background: #8883; overflow: hidden; }
+.loan-health__fill { height: 100%; }
+.loan-health--healthy .loan-health__fill { background: #1a9d55; }
+.loan-health--warning .loan-health__fill { background: #d98a00; }
+.loan-health--danger .loan-health__fill { background: #d33; }
+.loan-health__label { font-weight: 600; margin: 6px 0 0; }
+.loan-health__warning { margin: 6px 0 0; }

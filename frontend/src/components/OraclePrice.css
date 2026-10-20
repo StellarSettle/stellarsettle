@@ -1,0 +1,2 @@
+.oracle-price { border: 1px solid #8884; border-radius: 8px; padding: 12px; }
+.oracle-price__stale { margin: 6px 0 0; padding: 6px 8px; border-radius: 6px; background: #d98a0030; font-weight: 600; }
