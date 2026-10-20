@@ -20,13 +20,29 @@ npm run build
 npm start
 ```
 
+## API Documentation
+
+An interactive Swagger UI is available at **`/api/docs`** when the server is running. The OpenAPI 3.x spec is served at `/api/docs/json`.
+
+## Rate Limiting
+
+All public read endpoints are rate-limited to prevent RPC quota exhaustion or database flooding. Authenticated metadata write endpoints have a separate (higher) limit.
+
+| Variable | Default | Description |
+|---|---|---|
+| `RATE_LIMIT_READ_MAX` | `100` | Max requests per window for anonymous read routes |
+| `RATE_LIMIT_WRITE_MAX` | `30` | Max requests per window for authenticated write routes |
+| `RATE_LIMIT_WINDOW_MS` | `60000` | Rate-limit window in milliseconds (default: 1 minute) |
+
+When a limit is exceeded the server returns **HTTP 429** with a `Retry-After` header indicating when the client may retry.
+
 ## API Endpoints
 
 ### Health & Events
 
 - **GET /api/health** — Check service status, network, and event monitor state
-- **GET /api/events** — Retrieve paginated `dispute_escalated` events (query params: `after` ledger, `limit` max 100)
-- **GET /api/stream** — Server-Sent Events stream of new disputes (SSE)
+- **GET /api/events** — Retrieve paginated contract events (query params: `after` ledger, `limit` max 100)
+- **GET /api/stream** — Server-Sent Events stream of new `dispute_escalated` events (SSE)
 
 ### Shipments
 
@@ -53,14 +69,6 @@ npm start
   - Body: `{ value: string }`
   - Returns 401 if `METADATA_API_KEY` not configured or mismatched
   - Returns 400 if value exceeds 4000 characters
-
-## API Endpoints
-
-### Health & Events
-
-- **GET /api/health** — Check service status, network, and event monitor state
-- **GET /api/events** — Retrieve paginated `dispute_escalated` events (query params: `after` ledger, `limit` max 100)
-- **GET /api/stream** — Server-Sent Events stream of new disputes (SSE)
 
 ### Shipments
 
