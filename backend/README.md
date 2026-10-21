@@ -1,86 +1,240 @@
 # StellarSettle Backend
 
-Node.js API and Soroban RPC event monitor for shipment escalation alerts and off-chain shipment metadata.
+Node.js API and Soroban RPC event monitor for the StellarSettle escrow contract.
+Monitors `dispute_escalated` events on-chain, persists them in a local SQLite
+database, streams real-time alerts to the frontend over SSE, and provides a
+read-only proxy for shipment and milestone data together with an optional
+off-chain metadata write endpoint.
 
-## Local setup
+## Requirements
+
+- Node.js **≥ 22.5**
+- A deployed StellarSettle contract (optional — the server starts without one and
+  the event monitor is simply disabled)
+
+## Setup
 
 ```sh
 cp .env.example .env
+# Edit .env — at minimum set STELLAR_CONTRACT_ID
 npm install
-npm run dev
+npm run dev        # ts-node watch mode
 ```
 
-Set `STELLAR_CONTRACT_ID` to enable the event monitor. By default, it scans recent contract events on Testnet and persists `dispute_escalated` alerts and metadata in a local SQLite database. The API exposes `GET /api/health`, `GET /api/events`, `GET /api/stream` (SSE), shipment endpoints, and metadata read/write endpoints. Metadata writes are disabled until a non-empty `METADATA_API_KEY` is configured; keep that key on the server and never expose it in frontend variables.
+The server starts on `http://127.0.0.1:8787` by default.
 
-The event monitor starts from the latest ledger minus ten when `START_LEDGER` is unset. Configure a ledger explicitly when recovering an older range. This service does not sign or submit contract transactions; the connected wallet remains responsible for user-authorized actions.
+For a production build:
+
+```sh
+npm run build      # compiles to dist/
+npm start          # runs dist/index.js
+```
+
+Type-check without building:
 
 ```sh
 npm run typecheck
-npm run build
-npm start
 ```
 
-## API Endpoints
+---
 
-### Health & Events
+## Environment variables
 
-- **GET /api/health** — Check service status, network, and event monitor state
-- **GET /api/events** — Retrieve paginated `dispute_escalated` events (query params: `after` ledger, `limit` max 100)
-- **GET /api/stream** — Server-Sent Events stream of new disputes (SSE)
+All variables are validated at startup via a `zod` schema. The process exits
+immediately if a required variable is missing or has an invalid value. Copy
+`.env.example` as a starting point — every variable listed there maps 1-to-1
+with the table below.
+
+| Variable | Type | Default | Required | Purpose |
+|---|---|---|---|---|
+| `HOST` | string | `127.0.0.1` | No | Hostname or IP the HTTP server binds to. Set to `0.0.0.0` to accept external connections. |
+| `PORT` | integer | `8787` | No | TCP port the HTTP server listens on. |
+| `STELLAR_NETWORK` | `testnet` \| `mainnet` | `testnet` | No | Used for display/logging only (reported in `GET /api/health`). |
+| `STELLAR_RPC_URL` | URL | `https://soroban-testnet.stellar.org` | No | Soroban JSON-RPC endpoint polled for contract events. |
+| `STELLAR_CONTRACT_ID` | string | *(empty)* | **Yes*** | Deployed StellarSettle contract address. When empty the event monitor and all Soroban RPC-backed endpoints are disabled. |
+| `START_LEDGER` | integer ≥ 0 | *(unset)* | No | Ledger sequence to start scanning from. When unset, the monitor begins from `latestLedger − 10`. Set this when backfilling a historical range. |
+| `POLL_INTERVAL_MS` | integer ≥ 1000 | `5000` | No | Milliseconds between Soroban RPC event polls. Lower values reduce alert latency at the cost of more RPC calls. |
+| `DATABASE_PATH` | string | `./data/stellarsettle.sqlite` | No | Path to the SQLite database file. The directory is created automatically. |
+| `METADATA_API_KEY` | string | *(empty)* | **Yes*** | Secret key required in the `X-Api-Key` header to write shipment metadata via `PUT /api/metadata/:shipmentId/:key`. When empty, all metadata writes are rejected with `401`. **Never expose this in frontend environment variables.** |
+| `WEB_ORIGIN` | URL | `http://localhost:5173` | No | Allowed CORS origin for the frontend. Must match the URL the browser loads the dashboard from. |
+
+> `*` Technically optional at the schema level (the server starts without them)
+> but required for full functionality.
+
+---
+
+## API routes
+
+All routes are prefixed with `/api/`. The server returns JSON for every
+endpoint except `GET /api/stream` (SSE).
+
+### Health
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/health` | None | Returns service status, configured network, event-monitor connection state, and the last scanned ledger. |
+
+**Example response**
+
+```json
+{
+  "status": "ok",
+  "network": "testnet",
+  "contractConfigured": true,
+  "eventMonitor": "connected",
+  "lastScannedLedger": 1234567
+}
+```
+
+`eventMonitor` values: `"disabled"` (no `STELLAR_CONTRACT_ID`), `"connecting"` (RPC not yet reachable), `"connected"` (polling successfully).
+
+---
+
+### Events
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/events` | None | Returns paginated `dispute_escalated` events stored in the local database. |
+| `GET` | `/api/stream` | None | Server-Sent Events (SSE) stream that pushes `dispute_escalated` events in real time. |
+
+**`GET /api/events` query parameters**
+
+| Param | Default | Description |
+|---|---|---|
+| `after` | `0` | Return only events with a ledger number **greater than** this value. Pass the ledger of the last event you received to page forward. |
+| `limit` | `50` | Maximum number of events to return. Capped at `100`. |
+
+**`GET /api/stream`**
+
+Opens a persistent SSE connection. The server sends:
+- A `: connected` comment immediately on connect.
+- A `: keepalive` comment every 20 seconds.
+- `event: dispute_escalated` frames whenever a new escalation is detected.
+
+Each SSE frame carries a JSON payload:
+
+```json
+{
+  "id": "...",
+  "ledger": 1234567,
+  "type": "dispute_escalated",
+  "shipmentId": "SHIP-001",
+  "milestoneIndex": 1,
+  "openedLedger": 1234500,
+  "currentLedger": 1234567
+}
+```
+
+---
 
 ### Shipments
 
-- **GET /api/shipments** — List shipment IDs with pagination (query params: `after` cursor, `limit` max 100)
-  - Returns: `{ shipments: string[], nextCursor?: number }`
-  - Description: Proxies contract's `list_shipments` function with pagination support matching `/api/events` style
-  
-- **GET /api/shipments/:id** — Retrieve full shipment details
-  - Response: Full `Shipment` struct (all 51+ fields)
-  - Returns 404 if shipment ID not found
-  - Description: Reads full shipment state via Soroban RPC
-  
-- **GET /api/shipments/:id/milestones** — List all milestones for a shipment with notes
-  - Response: `{ milestones: Array<Milestone & { notes: MilestoneNote[] }> }`
-  - Returns 404 if shipment ID not found
-  - Description: Returns milestone list with status, proof hash, and associated notes for each milestone
+All shipment routes proxy Soroban RPC calls to the deployed contract. They
+return `503 { "error": "contract_not_configured" }` when `STELLAR_CONTRACT_ID`
+is not set.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/shipments` | None | List shipment IDs with cursor-based pagination. Proxies the contract's `list_shipments` function. |
+| `GET` | `/api/shipments/:id` | None | Retrieve the full `Shipment` struct for a single shipment by its ID. Returns `404` if not found. |
+| `GET` | `/api/shipments/:id/milestones` | None | Retrieve all milestones for a shipment, each annotated with their associated on-chain notes. Returns `404` if not found. |
+
+**`GET /api/shipments` query parameters**
+
+| Param | Default | Description |
+|---|---|---|
+| `after` | `0` | Cursor returned by the previous page (the numeric index into the shipment list). |
+| `limit` | `50` | Maximum IDs to return per page. Capped at `100`. |
+
+**`GET /api/shipments` response**
+
+```json
+{
+  "shipments": ["SHIP-001", "SHIP-002"],
+  "nextCursor": 10
+}
+```
+
+`nextCursor` is `null` when the last page has been reached.
+
+**`GET /api/shipments/:id` response**
+
+Returns the full `Shipment` struct as returned by the contract's `get_shipment`
+function (buyer, supplier, logistics, arbiter, token, amounts, milestones,
+status, timestamps, dispute configuration, etc.).
+
+**`GET /api/shipments/:id/milestones` response**
+
+```json
+{
+  "milestones": [
+    {
+      "name": "Goods Dispatched",
+      "payment_percent": 25,
+      "proof_hash": "bafybeih...",
+      "status": "Confirmed",
+      "notes": []
+    }
+  ]
+}
+```
+
+---
 
 ### Metadata
 
-- **GET /api/metadata/:shipmentId** — Retrieve all metadata for a shipment
-  - Returns: `{ [key: string]: { value: string, updatedAt: string } }`
+Off-chain key/value pairs attached to a shipment. Reads are public; writes
+require the `X-Api-Key` header matching `METADATA_API_KEY`.
 
-- **PUT /api/metadata/:shipmentId/:key** — Store off-chain metadata (requires `X-API-Key` header)
-  - Body: `{ value: string }`
-  - Returns 401 if `METADATA_API_KEY` not configured or mismatched
-  - Returns 400 if value exceeds 4000 characters
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/metadata/:shipmentId` | None | Retrieve all metadata entries for a shipment. Returns an empty object `{}` when none exist. |
+| `PUT` | `/api/metadata/:shipmentId/:key` | `X-Api-Key` | Store or overwrite a single metadata value. |
 
-## API Endpoints
+**`PUT /api/metadata/:shipmentId/:key`**
 
-### Health & Events
+- Header: `X-Api-Key: <METADATA_API_KEY>`
+- Body: `{ "value": "<string up to 4000 chars>" }`
+- Key must match `[a-zA-Z0-9_-]{1,64}`.
+- Returns `204 No Content` on success.
+- Returns `401` if the key is missing, empty, or mismatched.
+- Returns `400` if the shipment ID, key format, or value is invalid.
 
-- **GET /api/health** — Check service status, network, and event monitor state
-- **GET /api/events** — Retrieve paginated `dispute_escalated` events (query params: `after` ledger, `limit` max 100)
-- **GET /api/stream** — Server-Sent Events stream of new disputes (SSE)
+**`GET /api/metadata/:shipmentId` response**
 
-### Shipments
+```json
+{
+  "po_number": { "value": "PO-2024-7890", "updatedAt": "2024-01-15 10:30:00" },
+  "cost_centre": { "value": "CC-APAC-42",  "updatedAt": "2024-01-15 10:31:00" }
+}
+```
 
-- **GET /api/shipments** — List shipment IDs with pagination (query params: `after` cursor, `limit` max 100)
-  - Returns: `{ shipments: string[], nextCursor?: number }`
-  
-- **GET /api/shipments/:id** — Retrieve full shipment details
-  - Response: Full `Shipment` struct (all 51+ fields)
-  - Returns 404 if shipment ID not found
-  
-- **GET /api/shipments/:id/milestones** — List all milestones for a shipment with notes
-  - Response: `{ milestones: Array<Milestone & { notes: MilestoneNote[] }> }`
-  - Returns 404 if shipment ID not found
+---
 
-### Metadata
+## Database
 
-- **GET /api/metadata/:shipmentId** — Retrieve all metadata for a shipment
-  - Returns: `{ [key: string]: { value: string, updatedAt: string } }`
+The server uses a local SQLite database (via Node.js built-in `node:sqlite`).
+Two tables are created automatically on startup:
 
-- **PUT /api/metadata/:shipmentId/:key** — Store off-chain metadata (requires `X-API-Key` header)
-  - Body: `{ value: string }`
-  - Returns 401 if `METADATA_API_KEY` not configured or mismatched
-  - Returns 400 if value exceeds 4000 characters
+| Table | Contents |
+|---|---|
+| `contract_events` | De-duplicated `dispute_escalated` event records persisted from on-chain polling. |
+| `shipment_metadata` | Off-chain key/value metadata written via `PUT /api/metadata/:shipmentId/:key`. |
+
+The database file location is controlled by `DATABASE_PATH`. WAL mode is
+enabled for better concurrent read performance.
+
+---
+
+## Architecture notes
+
+- **No transaction signing.** This service is read-only with respect to the
+  Soroban contract. All state-changing operations (confirm milestones, submit
+  proof, etc.) must be signed by the user's wallet (Freighter) in the frontend.
+- **Event monitor.** When `STELLAR_CONTRACT_ID` is set, the service polls
+  Soroban RPC every `POLL_INTERVAL_MS` milliseconds, filters for
+  `dispute_escalated` contract events, persists new ones, and fans them out to
+  all open SSE connections.
+- **Backfilling.** Set `START_LEDGER` to a past ledger to recover historical
+  events on first run. On subsequent restarts the service resumes from
+  `lastScannedLedger + 1`, so no duplicate scanning occurs.
