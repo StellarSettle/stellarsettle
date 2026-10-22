@@ -96,6 +96,26 @@ Architecture
     call contract fns    or disputes         (USDC on Stellar)
 ```
 
+```mermaid
+flowchart LR
+  Contract["Soroban contract"]
+  Poller["Backend event poller"]
+  API["Backend REST API + SSE"]
+  Database[("SQLite database")]
+  Frontend["Frontend dashboard"]
+
+  Contract -->|events and ledger state| Poller
+  Poller -->|persist events and metadata| Database
+  Database -->|stored events and metadata| API
+  API -->|metadata writes| Database
+  Frontend -->|REST and SSE requests| API
+  API -->|JSON and SSE updates| Frontend
+  API -->|shipment queries via Soroban RPC| Contract
+  Contract -->|shipment state| API
+  Frontend -->|wallet transactions and queries| Contract
+  Contract -->|on-chain state| Frontend
+```
+
 Roles
 Role Address Permissions
 Buyer Locks USDC, confirms milestones, raises disputes, cancels shipment Most actions
