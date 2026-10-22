@@ -1,0 +1,82 @@
+# Dependabot configuration for automated dependency updates (#121)
+# Covers: Cargo (Rust), npm workspaces (Node.js/frontend/backend)
+
+version: 2
+updates:
+  # Cargo dependencies (contracts & backend Rust code)
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - ZeeTech374
+    labels:
+      - dependencies
+      - cargo
+    commit-message:
+      prefix: "chore(cargo):"
+      include: "scope"
+    pull-request-branch-name:
+      separator: "/"
+
+  # Frontend npm dependencies
+  - package-ecosystem: npm
+    directory: "/frontend"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:15"
+    open-pull-requests-limit: 5
+    reviewers:
+      - ZeeTech374
+    labels:
+      - dependencies
+      - frontend
+    commit-message:
+      prefix: "chore(frontend):"
+      include: "scope"
+    pull-request-branch-name:
+      separator: "/"
+    allow:
+      - dependency-type: production
+      - dependency-type: development
+
+  # Backend npm dependencies
+  - package-ecosystem: npm
+    directory: "/backend"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "03:30"
+    open-pull-requests-limit: 5
+    reviewers:
+      - ZeeTech374
+    labels:
+      - dependencies
+      - backend
+    commit-message:
+      prefix: "chore(backend):"
+      include: "scope"
+    pull-request-branch-name:
+      separator: "/"
+    allow:
+      - dependency-type: production
+      - dependency-type: development
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: tuesday
+      time: "03:00"
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: "ci:"
+      include: "scope"
