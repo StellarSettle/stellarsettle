@@ -1,7 +1,7 @@
 # StellarSettle Monorepo
 ![CI](https://github.com/shakurJJ/stellarsettle-contract/actions/workflows/ci.yml/badge.svg)
 ![codecov](https://codecov.io/gh/shakurJJ/stellarsettle-contract/branch/main/graph/badge.svg)
-
+....
 > **Milestone-based supply chain escrow on Stellar Soroban**
 > StellarSettle is a Soroban smart contract that locks buyer payment in escrow and automatically releases funds to the supplier as each delivery milestone is confirmed on-chain. No middlemen, no delayed wire transfers, no trust required.
 >
@@ -94,6 +94,26 @@ Architecture
          ↑                    ↑                    ↑
     Buyer / Supplier     Buyer confirms      Token SAC contract
     call contract fns    or disputes         (USDC on Stellar)
+```
+
+```mermaid
+flowchart LR
+  Contract["Soroban contract"]
+  Poller["Backend event poller"]
+  API["Backend REST API + SSE"]
+  Database[("SQLite database")]
+  Frontend["Frontend dashboard"]
+
+  Contract -->|events and ledger state| Poller
+  Poller -->|persist events and metadata| Database
+  Database -->|stored events and metadata| API
+  API -->|metadata writes| Database
+  Frontend -->|REST and SSE requests| API
+  API -->|JSON and SSE updates| Frontend
+  API -->|shipment queries via Soroban RPC| Contract
+  Contract -->|shipment state| API
+  Frontend -->|wallet transactions and queries| Contract
+  Contract -->|on-chain state| Frontend
 ```
 
 Roles
