@@ -2343,6 +2343,7 @@ Post-upgrade state migration entrypoint.
 ---
 
 Events
+See [docs/EVENTS.md](docs/EVENTS.md) for the complete contract event topic and payload reference, and [docs/API.md](docs/API.md) for backend REST examples.
 The contract emits the following events (subscribe via Horizon or RPC):
 
 Event name	Payload	When
@@ -2511,6 +2512,7 @@ cargo check --workspace
 ### Frontend and Backend
 
 The applications have independent Node.js dependencies. Use Node.js 22.5 or newer.
+The [backend environment template](backend/.env.example) and [frontend environment template](frontend/.env.example) list all supported settings; copy each to the local filename shown below.
 
 Configure and start the backend event API:
 
