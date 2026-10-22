@@ -6,6 +6,9 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { scValToNative, rpc, xdr } from "@stellar/stellar-sdk";
 import { z } from "zod";
+import { EventMonitor } from "./eventMonitor.js";
+import { createCheckpointStore } from "./scanCheckpoint.js";
+import { monitorConfig } from "./monitorConfig.js";
 
 const envSchema = z.object({
   HOST: z.string().default("127.0.0.1"),
@@ -13,7 +16,7 @@ const envSchema = z.object({
   STELLAR_NETWORK: z.enum(["testnet", "mainnet"]).default("testnet"),
   STELLAR_RPC_URL: z.string().url().default("https://soroban-testnet.stellar.org"),
   STELLAR_CONTRACT_ID: z.string().default(""),
-  START_LEDGER: z.coerce.number().int().nonnegative().optional(),
+  ...monitorConfig.shape,
   POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
   DATABASE_PATH: z.string().default("./data/stellarsettle.sqlite"),
   METADATA_API_KEY: z.string().default(""),
@@ -58,7 +61,40 @@ type EscalationEvent = {
 const app = Fastify({ logger: true });
 const streams = new Set<(event: EscalationEvent) => void>();
 const rpcServer = new rpc.Server(config.STELLAR_RPC_URL);
-let lastScannedLedger = config.START_LEDGER;
+const checkpointStore = createCheckpointStore(database, config.STELLAR_NETWORK, config.STELLAR_CONTRACT_ID);
+const monitor = new EventMonitor({
+  rpc: rpcServer,
+  contractId: config.STELLAR_CONTRACT_ID,
+  checkpoint: checkpointStore.load(),
+  startLedger: config.START_LEDGER,
+  backfillFromLedger: config.BACKFILL_FROM_LEDGER,
+  maxPages: config.BACKFILL_MAX_PAGES,
+  save: checkpointStore.save,
+  log: app.log,
+  process: (event) => {
+    const topics = event.topic.map((topic) => decodeScVal(topic));
+    if (topics[0] !== "dispute_escalated") return;
+    const payload = decodeScVal(event.value);
+    if (!Array.isArray(payload) || payload.length < 3) return;
+    const numbers = payload.slice(0, 3).map(Number);
+    if (numbers.some((number) => !Number.isFinite(number))) return;
+    const [milestoneIndex, openedLedger, currentLedger] = numbers as [number, number, number];
+    const parsed: EscalationEvent = {
+      id: event.id,
+      ledger: event.ledger,
+      type: "dispute_escalated",
+      shipmentId: String(topics[1] ?? ""),
+      milestoneIndex,
+      openedLedger,
+      currentLedger,
+    };
+    const inserted = database.prepare(`
+      INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(parsed.id, parsed.ledger, parsed.type, parsed.shipmentId, JSON.stringify(parsed));
+    if (Number(inserted.changes) > 0) streams.forEach((write) => write(parsed));
+  },
+});
 let pollTimer: NodeJS.Timeout | undefined;
 let pollRunning = false;
 let rpcHealthy = false;
@@ -70,7 +106,8 @@ app.get("/api/health", async () => ({
   network: config.STELLAR_NETWORK,
   contractConfigured: Boolean(config.STELLAR_CONTRACT_ID),
   eventMonitor: config.STELLAR_CONTRACT_ID ? (rpcHealthy ? "connected" : "connecting") : "disabled",
-  lastScannedLedger: lastScannedLedger ?? null,
+  lastScannedLedger: monitor.lastScannedLedger ?? null,
+  backfill: config.STELLAR_CONTRACT_ID ? monitor.backfill : null,
 }));
 
 app.get<{ Querystring: { after?: string; limit?: string } }>("/api/events", async (request) => {
@@ -202,52 +239,7 @@ async function scanEvents(): Promise<void> {
   if (pollRunning || !config.STELLAR_CONTRACT_ID) return;
   pollRunning = true;
   try {
-    const latestLedger = (await rpcServer.getLatestLedger()).sequence;
-    if (lastScannedLedger === undefined) {
-      lastScannedLedger = Math.max(1, latestLedger - 10);
-    }
-    const startLedger = Math.max(1, lastScannedLedger + 1);
-    if (startLedger > latestLedger) {
-      rpcHealthy = true;
-      return;
-    }
-    const filters = [{ type: "contract" as const, contractIds: [config.STELLAR_CONTRACT_ID] }];
-    let cursor: string | undefined;
-    let hasMore = true;
-    while (hasMore) {
-      const page = cursor
-        ? await rpcServer.getEvents({ cursor, filters, limit: 100 })
-        : await rpcServer.getEvents({ startLedger, endLedger: latestLedger, filters, limit: 100 });
-
-      for (const event of page.events) {
-        const topics = event.topic.map((topic) => decodeScVal(topic));
-        if (topics[0] !== "dispute_escalated") continue;
-        const payload = decodeScVal(event.value);
-        if (!Array.isArray(payload) || payload.length < 3) continue;
-        const numbers = payload.slice(0, 3).map(Number);
-        if (numbers.some((number) => !Number.isFinite(number))) continue;
-        const [milestoneIndex, openedLedger, currentLedger] = numbers as [number, number, number];
-        const parsed: EscalationEvent = {
-          id: event.id,
-          ledger: event.ledger,
-          type: "dispute_escalated",
-          shipmentId: String(topics[1] ?? ""),
-          milestoneIndex,
-          openedLedger,
-          currentLedger,
-        };
-        const inserted = database.prepare(`
-          INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(parsed.id, parsed.ledger, parsed.type, parsed.shipmentId, JSON.stringify(parsed));
-        if (Number(inserted.changes) > 0) streams.forEach((write) => write(parsed));
-      }
-
-      hasMore = page.events.length === 100 && page.cursor !== cursor;
-      cursor = page.cursor;
-    }
-
-    lastScannedLedger = latestLedger;
+    await monitor.scan();
     rpcHealthy = true;
   } catch (error) {
     rpcHealthy = false;
