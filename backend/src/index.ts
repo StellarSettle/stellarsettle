@@ -2,6 +2,7 @@ import "dotenv/config";
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import { DatabaseSync } from "node:sqlite";
+import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { scValToNative, rpc, xdr } from "@stellar/stellar-sdk";
@@ -55,7 +56,11 @@ type EscalationEvent = {
   currentLedger: number;
 };
 
-const app = Fastify({ logger: true });
+const app = Fastify({
+  logger: true,
+  requestIdHeader: "x-request-id",
+  genReqId: (request) => request.headers["x-request-id"]?.toString() || randomUUID(),
+});
 const streams = new Set<(event: EscalationEvent) => void>();
 const rpcServer = new rpc.Server(config.STELLAR_RPC_URL);
 let lastScannedLedger = config.START_LEDGER;
@@ -63,7 +68,20 @@ let pollTimer: NodeJS.Timeout | undefined;
 let pollRunning = false;
 let rpcHealthy = false;
 
-await app.register(cors, { origin: config.WEB_ORIGIN });
+await app.register(cors, { origin: config.WEB_ORIGIN, exposeHeaders: ["x-request-id"] });
+
+app.addHook("onRequest", async (request, reply) => {
+  reply.header("x-request-id", request.id);
+});
+
+app.addHook("onResponse", async (request, reply) => {
+  request.log.info({
+    requestId: request.id,
+    route: request.routeOptions.url,
+    statusCode: reply.statusCode,
+    durationMs: reply.elapsedTime,
+  }, "Request completed");
+});
 
 app.get("/api/health", async () => ({
   status: "ok",
@@ -99,7 +117,7 @@ app.get<{ Querystring: { after?: string; limit?: string } }>("/api/shipments", a
       nextCursor: null,
     };
   } catch (error) {
-    app.log.error({ err: error }, "Failed to query shipments");
+    request.log.error({ err: error }, "Failed to query shipments");
     return reply.code(503).send({ error: "contract_query_failed" });
   }
 });
@@ -120,7 +138,7 @@ app.get<{ Params: { id: string } }>("/api/shipments/:id", async (request, reply)
     if (errMsg.includes("shipment not found")) {
       return reply.code(404).send({ error: "shipment_not_found" });
     }
-    app.log.error({ err: error }, "Failed to query shipment");
+    request.log.error({ err: error }, "Failed to query shipment");
     return reply.code(503).send({ error: "contract_query_failed" });
   }
 });
@@ -141,7 +159,7 @@ app.get<{ Params: { id: string } }>("/api/shipments/:id/milestones", async (requ
     if (errMsg.includes("shipment not found")) {
       return reply.code(404).send({ error: "shipment_not_found" });
     }
-    app.log.error({ err: error }, "Failed to query milestones");
+    request.log.error({ err: error }, "Failed to query milestones");
     return reply.code(503).send({ error: "contract_query_failed" });
   }
 });
