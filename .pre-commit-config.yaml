@@ -1,0 +1,62 @@
+# Pre-commit hook configuration for StellarSettle
+# Runs linting and formatting checks before every commit
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # Rust: Format check with cargo fmt
+  - repo: local
+    hooks:
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c 'cd contracts && cargo fmt -- --check && cd ../backend && cargo fmt -- --check'
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [commit]
+
+      # Rust: Lint with cargo clippy
+      - id: cargo-clippy
+        name: cargo clippy
+        entry: bash -c 'cd contracts && cargo clippy -- -D warnings && cd ../backend && cargo clippy -- -D warnings'
+        language: system
+        types: [rust]
+        pass_filenames: false
+        stages: [commit]
+
+      # TypeScript/JavaScript: ESLint
+      - id: eslint
+        name: eslint
+        entry: bash -c 'cd frontend && npm run lint -- --fix'
+        language: system
+        types: [javascript, typescript]
+        pass_filenames: false
+        stages: [commit]
+
+      # TypeScript/JavaScript: Prettier
+      - id: prettier
+        name: prettier
+        entry: bash -c 'cd frontend && npm run format'
+        language: system
+        types: [javascript, typescript]
+        pass_filenames: false
+        stages: [commit]
+
+  # YAML: Basic syntax check
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: yaml-unsafe
+        files: ^\.github/
+
+  # Markdown: Basic checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+        files: \.md$
+      - id: end-of-file-fixer
+        files: \.md$
+
+# Files to exclude from all hooks
+exclude: ^(node_modules/|target/|\.cargo/)
