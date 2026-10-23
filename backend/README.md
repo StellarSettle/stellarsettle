@@ -44,6 +44,12 @@ npm start
   - Returns 404 if shipment ID not found
   - Description: Returns milestone list with status, proof hash, and associated notes for each milestone
 
+- **GET /api/shipments/:id/warranty** — Retrieve warranty status and any filed claim for a shipment
+  - Response: `{ warrantyEndLedger: number | null, balance: string | null, claim: WarrantyClaim | null }`
+  - `claim` is `null` when no warranty claim has been filed for the shipment
+  - Returns 404 if shipment ID not found
+  - Description: Reads `get_warranty_claim`, `get_warranty_balance`, and `get_warranty_end_ledger` via Soroban RPC; `warrantyEndLedger` is included for display
+
 ### Metadata
 
 - **GET /api/metadata/:shipmentId** — Retrieve all metadata for a shipment
