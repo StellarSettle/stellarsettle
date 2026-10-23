@@ -146,6 +146,34 @@ app.get<{ Params: { id: string } }>("/api/shipments/:id/milestones", async (requ
   }
 });
 
+app.get<{ Params: { id: string } }>("/api/shipments/:id/warranty", async (request, reply) => {
+  if (!config.STELLAR_CONTRACT_ID) {
+    return reply.code(503).send({ error: "contract_not_configured" });
+  }
+
+  try {
+    const { id } = request.params;
+    const [claim, balance, endLedger] = await Promise.all([
+      simulateContractRead("get_warranty_claim", [id]),
+      simulateContractRead("get_warranty_balance", [id]),
+      simulateContractRead("get_warranty_end_ledger", [id]),
+    ]);
+    return {
+      shipmentId: id,
+      claim: claim ?? null,
+      balance: balance ?? null,
+      warrantyEndLedger: endLedger ?? null,
+    };
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : String(error);
+    if (errMsg.includes("shipment not found")) {
+      return reply.code(404).send({ error: "shipment_not_found" });
+    }
+    app.log.error({ err: error }, "Failed to query warranty");
+    return reply.code(503).send({ error: "contract_query_failed" });
+  }
+});
+
 app.get<{ Params: { shipmentId: string } }>("/api/metadata/:shipmentId", async (request) => {
   const rows = database.prepare(`
     SELECT metadata_key AS key, value, updated_at AS updatedAt
@@ -196,6 +224,31 @@ app.get("/api/stream", async (request, reply) => {
 
 function decodeScVal(value: xdr.ScVal): unknown {
   return scValToNative(value) as unknown;
+}
+
+/**
+ * Simulates a read-only contract function call via Soroban RPC and returns
+ * the decoded native value. Returns null when the contract returns void/None.
+ */
+async function simulateContractRead(fn: string, args: string[]): Promise<unknown> {
+  const { Account, Contract, TransactionBuilder, BASE_FEE, Networks, nativeToScVal } =
+    await import("@stellar/stellar-sdk");
+  const networkPassphrase = config.STELLAR_NETWORK === "mainnet" ? Networks.PUBLIC : Networks.TESTNET;
+  // Simulation requires a source account; a well-known zero-balance key is sufficient for read-only calls.
+  const source = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHMO", "0");
+  const contract = new Contract(config.STELLAR_CONTRACT_ID);
+  const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase })
+    .addOperation(contract.call(fn, ...args.map((arg) => nativeToScVal(arg, { type: "string" }))))
+    .setTimeout(30)
+    .build();
+  const sim = await rpcServer.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(sim)) {
+    throw new Error(sim.error);
+  }
+  const retval = (sim as rpc.Api.SimulateTransactionSuccessResponse).result?.retval;
+  if (!retval) return null;
+  const native = decodeScVal(retval);
+  return native === undefined ? null : native;
 }
 
 async function scanEvents(): Promise<void> {
