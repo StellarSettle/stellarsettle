@@ -1,0 +1,21 @@
+/* Accessibility audit fixes (see docs/a11y-audit.md). */
+.skip-link { position: fixed; z-index: 100; top: 8px; left: 8px; padding: 10px 14px; background: #0e5642; color: #fff; border-radius: 6px; transform: translateY(-200%); }
+.skip-link:focus { transform: none; }
+a:focus-visible, button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 3px solid #1d6fd1; outline-offset: 2px; }
+main:focus { outline: none; }
+/* Contrast: raise muted/tiny text to AA (>= 4.5:1) */
+:root { --muted: #5d6862; }
+.nav-count { color: #5b645e; }
+.alert-count { color: #9a4130; }
+.status-pill { color: #3d5a47; }
+.status-pill.cancelled, .status-pill.expired { color: #8f3f30; }
+.status-pill.completed { color: #3b5578; }
+th { color: #5f6862; }
+small { color: #5d6862; }
+:root[data-theme="dark"] { --muted: #aab5ae; }
+:root[data-theme="dark"] .nav-count, :root[data-theme="dark"] th, :root[data-theme="dark"] small { color: #b4beb8; }
+:root[data-theme="dark"] .status-pill { color: #8bd8bb; }
+:root[data-theme="dark"] .status-pill.completed { color: #a9c8e6; }
+:root[data-theme="dark"] .status-pill.cancelled, :root[data-theme="dark"] .status-pill.expired { color: #f0a898; }
+:root[data-theme="dark"] .alert-count { color: #e58b79; }
+@media (prefers-reduced-motion: reduce) { * { animation-duration: .01ms !important; transition-duration: .01ms !important; } }
