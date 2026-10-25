@@ -529,7 +529,19 @@ app.put<{ Params: { shipmentId: string; key: string }; Body: { value?: unknown }
   },
 );
 
-app.get("/api/stream", async (request, reply) => {
+app.get<{ Querystring: { types?: string } }>("/api/stream", async (request, reply) => {
+  const rawTypes = request.query.types;
+  let typeFilter: Set<string> | null = null;
+  if (rawTypes !== undefined && rawTypes !== "") {
+    const requested = rawTypes.split(",").map((t) => t.trim()).filter(Boolean);
+    for (const t of requested) {
+      if (!KNOWN_EVENT_TYPES.has(t)) {
+        return reply.code(400).send({ error: "unknown_event_type", type: t });
+      }
+    }
+    typeFilter = new Set(requested);
+  }
+
   reply.hijack();
   const response = reply.raw;
   response.writeHead(200, {
