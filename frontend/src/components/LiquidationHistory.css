@@ -1,0 +1,4 @@
+.liq-history { border: 1px solid #8884; border-radius: 8px; padding: 12px; }
+.liq-history table { width: 100%; border-collapse: collapse; }
+.liq-history th, .liq-history td { text-align: left; padding: 4px 6px; word-break: break-all; }
+.liq-history__pager { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
