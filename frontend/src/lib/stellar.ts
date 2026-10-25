@@ -268,5 +268,54 @@ export async function approveMilestoneSplit(wallet: Wallet, shipmentId: string, 
   );
 }
 
+export function getShipmentSummary(address: string, shipmentId: string): Promise<Shipment> {
+  return readContract<Shipment>(address, "get_shipment_summary", scString(shipmentId));
+}
+
+export function setShipmentMetadata(wallet: Wallet, shipmentId: string, key: string, value: string): Promise<string> {
+  return invokeContract(wallet, "set_shipment_metadata", scAddress(wallet.address), scString(shipmentId), scSymbol(key), scString(value));
+}
+
+// ---- Admin ----
+
+export function isPaused(address: string): Promise<boolean> {
+  return readContract<boolean>(address, "is_paused");
+}
+
+export function hasRole(address: string, role: Role, target: string): Promise<boolean> {
+  return readContract<boolean>(address, "has_role", scEnum(role), scAddress(target));
+}
+
+export function getFeeConfig(address: string): Promise<FeeConfig | null> {
+  return readContract<FeeConfig | null>(address, "get_fee_config");
+}
+
+export function setPaused(wallet: Wallet, paused: boolean): Promise<string> {
+  return invokeContract(wallet, paused ? "pause" : "unpause", scAddress(wallet.address));
+}
+
+export function setRole(wallet: Wallet, role: Role, target: string, grant: boolean): Promise<string> {
+  return invokeContract(wallet, grant ? "grant_role" : "revoke_role", scAddress(wallet.address), scEnum(role), scAddress(target));
+}
+
+export function setFeeConfig(wallet: Wallet, feeBps: number, treasury: string): Promise<string> {
+  return invokeContract(wallet, "set_fee_config", scAddress(wallet.address), scU32(feeBps), scAddress(treasury));
+}
+
+// ---- Arbiter ----
+
+export async function getArbiterDisputes(arbiter: string): Promise<DisputeEntry[]> {
+  const [shipmentIds, active] = await Promise.all([
+    readContract<string[]>(arbiter, "get_shipments_by_arbiter", scAddress(arbiter), scNone(), scU32(200)),
+    readContract<DisputeEntry[]>(arbiter, "get_active_disputes"),
+  ]);
+  const assigned = new Set(shipmentIds);
+  return active.filter((entry) => assigned.has(entry.shipment_id));
+}
+
+export function resolveDispute(wallet: Wallet, shipmentId: string, milestoneIndex: number, approve: boolean): Promise<string> {
+  return invokeContract(wallet, "resolve_dispute", scAddress(wallet.address), scString(shipmentId), scU32(milestoneIndex), xdr.ScVal.scvBool(approve), scNone());
+}
+
 export const appNetwork = network;
 export const configuredContractId = contractId;

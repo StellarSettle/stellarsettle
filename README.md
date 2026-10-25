@@ -2561,6 +2561,30 @@ Open the Vite URL (normally `http://localhost:5173`) and connect Freighter on th
 
 Validate either application from its directory with `npm run typecheck` and `npm run build`. The frontend's component tests run with `npm test`.
 
+#### Dashboard routes
+
+- `/` — settlement overview and shipment lookup.
+- `/arbiter` — the connected arbiter's dispute queue. It intersects `get_shipments_by_arbiter` with `get_active_disputes`, so only disputes on shipments assigned to that address are listed; approving or rejecting calls `resolve_dispute` and removes the entry from the queue.
+- `/admin` — pause control (`pause`/`unpause`, state read from `is_paused`), role management (`grant_role`/`revoke_role`/`has_role`) and fee configuration (`set_fee_config`). The page only renders controls for wallets that hold the `Pauser` or `FeeManager` role, or that match `VITE_STELLAR_ADMIN_ADDRESS` (required for role management). Other wallets see an access-denied notice. The contract still enforces every permission on-chain.
+
+#### End-to-end tests
+
+The dashboard ships Playwright tests that build the app, mock the backend API and Soroban RPC, and exercise the shipment lookup flow (successful and not-found lookups). They run headlessly in CI.
+
+```bash
+cd frontend
+npx playwright install chromium   # first run only
+npm run test:e2e
+```
+
+#### Translations
+
+All dashboard copy lives in `frontend/src/locales/<language>.json` and is loaded through [react-i18next](https://react.i18next.com/). To contribute a translation:
+
+1. Copy `frontend/src/locales/en.json` to `frontend/src/locales/<code>.json` (for example `es.json`) and translate the values. Keep the keys and `{{placeholders}}` unchanged.
+2. Register it in `frontend/src/i18n.ts`: `import es from "./locales/es.json";` and add `es: { translation: es }` to `resources`.
+3. The browser language is picked automatically; set `VITE_LOCALE=<code>` in `frontend/.env.local` to force one. Missing keys fall back to English.
+
 ---
 
 Running Tests

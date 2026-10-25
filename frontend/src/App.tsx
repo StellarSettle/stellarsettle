@@ -8,6 +8,7 @@ import {
   CircleHelp,
   ExternalLink,
   FileSearch,
+  Gavel,
   LayoutDashboard,
   Landmark,
   LoaderCircle,
@@ -146,6 +147,12 @@ function App() {
   }
 
   useEffect(() => {
+    const onPop = () => setRoute(routeFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
     const controller = new AbortController();
     fetch(`${backendUrl}/api/health`, { signal: controller.signal })
       .then((response) => {
@@ -224,7 +231,7 @@ function App() {
       setWallet(await connectWallet(walletId));
       setNotice("Wallet connected");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not connect wallet.");
+      setError(cause instanceof Error ? cause.message : t("wallet.connectError"));
     }
   }
 
@@ -402,7 +409,7 @@ function App() {
     setNotice("");
     try {
       const hash = await setShipmentMetadata(wallet, shipment.id, metadataKey.trim(), metadataValue);
-      setNotice(`On-chain metadata saved · ${hash.slice(0, 12)}…`);
+      setNotice(t("metadata.saved", { hash: hash.slice(0, 12) }));
       setMetadataKey("");
       setMetadataValue("");
       setShowMetadata(false);
@@ -454,13 +461,13 @@ function App() {
     <div className="app-shell">
       {showWalletModal && <WalletModal onSelect={connectWith} onClose={() => setShowWalletModal(false)} />}
       <aside className="sidebar">
-        <a className="brand" href="#overview" aria-label="StellarSettle home">
+        <a className="brand" href="/" onClick={(event) => navigate(event, "overview")} aria-label={t("brand.home")}>
           <span className="brand-mark"><span /></span>
           <span className="brand-name">stellar<span>settle</span></span>
         </a>
         <div className="workspace-switch">
           <span className="workspace-avatar">S</span>
-          <span><strong>Settlement desk</strong><small>Contract operations</small></span>
+          <span><strong>{t("workspace.name")}</strong><small>{t("workspace.subtitle")}</small></span>
           <ChevronDown size={15} />
         </div>
         <div className="nav-label">WORKSPACE</div>
@@ -478,8 +485,8 @@ function App() {
           <a className="nav-item help-link" href="https://developers.stellar.org/docs" target="_blank" rel="noreferrer"><CircleHelp size={17} />Stellar docs<ExternalLink size={13} /></a>
           <div className="profile-row">
             <span className="profile-avatar">{wallet ? wallet.address.slice(1, 2) : "S"}</span>
-            <span><strong>{wallet ? shortAddress(wallet.address) : "Guest session"}</strong><small>{wallet ? "Wallet connected" : "Connect to get started"}</small></span>
-            <button className="icon-button" aria-label="Account options"><ChevronDown size={16} /></button>
+            <span><strong>{wallet ? shortAddress(wallet.address) : t("profile.guest")}</strong><small>{wallet ? t("profile.connected") : t("profile.connectPrompt")}</small></span>
+            <button className="icon-button" aria-label={t("profile.options")}><ChevronDown size={16} /></button>
           </div>
         </div>
       </aside>
@@ -491,7 +498,7 @@ function App() {
             <span className={`backend-indicator ${apiState}`}><span />API {apiState === "online" ? "connected" : apiState === "offline" ? "offline" : "checking"}</span>
             <button className="icon-button notification-button" aria-label="Notifications" onClick={() => { markNotificationsAsRead(); setSelectedEventType(null); }}><Bell size={17} />{unreadCount > 0 && <i />}</button>
             <button className={`wallet-button ${wallet ? "connected" : ""}`} onClick={wallet ? () => setWallet(null) : handleConnect}>
-              <WalletCards size={16} />{wallet ? shortAddress(wallet.address) : "Connect wallet"}
+              <WalletCards size={16} />{wallet ? shortAddress(wallet.address) : t("wallet.connect")}
             </button>
           </div>
         </header>
@@ -512,18 +519,18 @@ function App() {
         </div> : <div className="page-content">
           <section className="page-heading">
             <div>
-              <div className="eyebrow"><span className="eyebrow-rule" />OPERATIONS</div>
-              <h1>Settlement overview</h1>
-              <p>Shipment health and escrow activity on Stellar.</p>
+              <div className="eyebrow"><span className="eyebrow-rule" />{t("overview.eyebrow")}</div>
+              <h1>{t("overview.title")}</h1>
+              <p>{t("overview.subtitle")}</p>
             </div>
-            <div className="heading-meta"><span className="live-pulse" />LIVE NETWORK <span className="meta-divider" />{appNetwork.toUpperCase()}</div>
+            <div className="heading-meta"><span className="live-pulse" />{t("overview.live")} <span className="meta-divider" />{appNetwork.toUpperCase()}</div>
           </section>
 
-          <section className="metrics-grid" aria-label="Workspace status">
+          <section className="metrics-grid" aria-label={t("overview.metricsLabel")}>
             <article className="metric metric-primary">
-              <div className="metric-top"><span>Tracked shipment</span><span className="metric-icon green-icon"><FileSearch size={16} /></span></div>
+              <div className="metric-top"><span>{t("metrics.trackedShipment")}</span><span className="metric-icon green-icon"><FileSearch size={16} /></span></div>
               <div className="metric-value">{shipment ? shipment.id : "—"}</div>
-              <div className="metric-foot"><span className="metric-foot-dot" />{shipment ? "Loaded from contract" : "Search by shipment ID"}</div>
+              <div className="metric-foot"><span className="metric-foot-dot" />{shipment ? t("metrics.loadedFromContract") : t("metrics.searchById")}</div>
             </article>
             <article className="metric">
               <div className="metric-top"><span>Escrow value</span><span className="metric-icon blue-icon"><ArrowDownLeft size={16} /></span></div>
@@ -531,14 +538,14 @@ function App() {
               <div className="metric-foot">{shipment ? `${amount(released)} released` : "Connect and look up a shipment"}</div>
             </article>
             <article className="metric">
-              <div className="metric-top"><span>Open disputes</span><span className="metric-icon coral-icon"><ShieldCheck size={16} /></span></div>
+              <div className="metric-top"><span>{t("metrics.openDisputes")}</span><span className="metric-icon coral-icon"><ShieldCheck size={16} /></span></div>
               <div className="metric-value">{shipment ? shipment.open_disputes : "—"}</div>
-              <div className="metric-foot">{shipment ? "On tracked shipment" : "No shipment selected"}</div>
+              <div className="metric-foot">{shipment ? t("metrics.onTracked") : t("metrics.noShipment")}</div>
             </article>
             <article className="metric">
-              <div className="metric-top"><span>Network status</span><span className="metric-icon amber-icon"><Activity size={16} /></span></div>
-              <div className="metric-value status-metric">{apiState === "online" ? "Operational" : apiState === "offline" ? "Disconnected" : "Checking"}</div>
-              <div className="metric-foot">Soroban RPC · {appNetwork}</div>
+              <div className="metric-top"><span>{t("metrics.networkStatus")}</span><span className="metric-icon amber-icon"><Activity size={16} /></span></div>
+              <div className="metric-value status-metric">{apiState === "online" ? t("metrics.operational") : apiState === "offline" ? t("metrics.disconnected") : t("metrics.checking")}</div>
+              <div className="metric-foot">{t("metrics.rpc", { network: appNetwork })}</div>
             </article>
           </section>
 
@@ -547,12 +554,12 @@ function App() {
           <div className="content-grid">
             <section className="panel shipment-panel" id="shipment">
               <div className="panel-heading">
-                <div><div className="section-kicker">CONTRACT DATA</div><h2>Shipment lookup</h2></div>
-                <span className="chain-badge"><span />{configuredContractId ? "ON-CHAIN" : "CONTRACT NOT SET"}</span>
+                <div><div className="section-kicker">{t("lookup.kicker")}</div><h2>{t("lookup.title")}</h2></div>
+                <span className="chain-badge"><span />{configuredContractId ? t("lookup.onChain") : t("lookup.contractNotSet")}</span>
               </div>
               <form className="search-form" onSubmit={handleSearch}>
-                <label className="search-input-wrap"><Search size={17} /><input aria-label="Shipment ID" placeholder="Enter shipment ID" value={shipmentId} onChange={(event) => setShipmentId(event.target.value)} /><kbd>↵</kbd></label>
-                <button className="primary-button" disabled={!wallet || loading || !shipmentId.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}{loading ? "Loading" : "Look up"}</button>
+                <label className="search-input-wrap"><Search size={17} /><input aria-label={t("lookup.inputLabel")} placeholder={t("lookup.placeholder")} value={shipmentId} onChange={(event) => setShipmentId(event.target.value)} /><kbd>↵</kbd></label>
+                <button className="primary-button" disabled={!wallet || loading || !shipmentId.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}{loading ? t("lookup.loading") : t("lookup.submit")}</button>
               </form>
               {!wallet && <div className="inline-callout"><WalletCards size={16} /><span>Connect a Stellar wallet to query public contract data and submit authorized transactions.</span><button onClick={handleConnect}>Connect</button></div>}
               {shipment ? <div className="shipment-detail">
@@ -566,9 +573,9 @@ function App() {
                 <div className="detail-footer"><span>Supplier <code>{shortAddress(shipment.supplier)}</code><span className="footer-sep"> · </span>Token <code>{shortAddress(shipment.token)}</code></span><span className="detail-actions">{wallet && <button className="text-button" onClick={() => setShowTopUp((shown) => !shown)}><ArrowDownLeft size={15} />Top up escrow</button>}<button className="text-button" onClick={() => setShowMetadata((shown) => !shown)}><Plus size={15} />Add metadata</button></span></div>
                 {showTopUp && wallet && <TopUpForm wallet={wallet} shipmentId={shipment.id} onToppedUp={async () => { await refreshShipment(); setShowTopUp(false); }} onError={setError} onNotice={setNotice} />}
                 {showMetadata && <form className="metadata-form" onSubmit={handleMetadata}>
-                  <input aria-label="Metadata key" placeholder="Key (e.g. po_number)" value={metadataKey} onChange={(event) => setMetadataKey(event.target.value)} pattern="[a-zA-Z0-9_]{1,32}" required />
-                  <input aria-label="Metadata value" placeholder="Value" value={metadataValue} onChange={(event) => setMetadataValue(event.target.value)} maxLength={1000} required />
-                  <button className="primary-button" disabled={writing}>{writing ? <LoaderCircle className="spin" size={15} /> : <ArrowUpRight size={15} />}{writing ? "Signing" : "Sign & save"}</button>
+                  <input aria-label={t("metadata.keyLabel")} placeholder={t("metadata.keyPlaceholder")} value={metadataKey} onChange={(event) => setMetadataKey(event.target.value)} pattern="[a-zA-Z0-9_]{1,32}" required />
+                  <input aria-label={t("metadata.valueLabel")} placeholder={t("metadata.valuePlaceholder")} value={metadataValue} onChange={(event) => setMetadataValue(event.target.value)} maxLength={1000} required />
+                  <button className="primary-button" disabled={writing}>{writing ? <LoaderCircle className="spin" size={15} /> : <ArrowUpRight size={15} />}{writing ? t("metadata.signing") : t("metadata.save")}</button>
                 </form>}
                 {wallet && <ShipmentMilestones key={shipment.id} wallet={wallet} shipmentId={shipment.id} onShipmentChanged={refreshShipment} onError={setError} onNotice={setNotice} />}
               </div> : <div className="empty-shipment"><span className="empty-icon"><FileSearch size={23} /></span><strong>Shipment details appear here</strong><span>Look up a shipment ID to inspect escrow, milestone, and dispute status.</span></div>}
@@ -622,8 +629,8 @@ function App() {
                 <span className="event-mark">{event.type === "dispute_raised" ? <ShieldAlert size={15} /> : <ShieldCheck size={15} />}</span>
                 <span className="event-copy"><strong>{eventLabels[event.type] ?? "Dispute escalated"}</strong><small>{event.shipmentId} · Milestone {event.milestoneIndex + 1}</small></span>
                 <span className="event-ledger">L{event.ledger.toLocaleString()}</span>
-              </article>)}</div> : <div className="empty-events"><span className="empty-icon subtle-icon"><Bell size={21} /></span><strong>No escalation events</strong><span>New contract alerts will appear here in real time.</span></div>}
-              <div className="activity-footer"><span className="stream-dot" />Listening for dispute_escalated<span className="stream-status">{apiState === "online" ? "Connected" : "Offline"}</span></div>
+              </article>)}</div> : <div className="empty-events"><span className="empty-icon subtle-icon"><Bell size={21} /></span><strong>{t("activity.emptyTitle")}</strong><span>{t("activity.emptyBody")}</span></div>}
+              <div className="activity-footer"><span className="stream-dot" />{t("activity.listening")}<span className="stream-status">{apiState === "online" ? t("activity.connected") : t("activity.offline")}</span></div>
             </section>
           </div>
 
