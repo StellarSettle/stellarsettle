@@ -3301,4 +3301,6 @@ stellar contract invoke --id <CONTRACT_ID> --source admin \
   --role FeeManager \
   --address <OPERATIONAL_ADDRESS>
 ```
+## Community Guidelines
 
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
