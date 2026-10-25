@@ -50,6 +50,16 @@ To recover a reported gap, use an RPC provider that still retains the required r
 - **GET /api/events** — Retrieve paginated `dispute_escalated`, `shipment_completed`, and `shipment_cancelled` events (query params: `after` ledger, `limit` max 100, optional `type` and `shipmentId`)
 - **GET /api/stream** — Server-Sent Events stream of contract events (SSE)
 
+### Stats
+
+- **GET /api/stats** — Contract-wide aggregate metrics for dashboard/landing widgets (#56)
+  - Returns: `{ totalShipments, totalVolume, totalDisputes, completedShipments, totalEscrowed?, fetchedAt }`
+  - `totalVolume` is returned as a string to preserve i128 precision (stroops)
+  - `totalEscrowed` is included only when `STELLAR_STATS_TOKEN` env var is set to a token SAC address
+  - Results are cached in-memory for 30 seconds (`x-cache` header: `hit` / `miss` / `stale`)
+  - Returns 503 if `STELLAR_CONTRACT_ID` is not configured or the contract call fails
+  - Description: Aggregates on-chain figures from the contract's `get_contract_stats` and `get_total_escrowed_value` read functions
+
 ### Shipments
 
 - **GET /api/shipments** — List shipment IDs with pagination (query params: `after` cursor, `limit` max 100)

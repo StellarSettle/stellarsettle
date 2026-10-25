@@ -12,6 +12,21 @@ import { EventMonitor } from "./eventMonitor.js";
 import { createCheckpointStore } from "./scanCheckpoint.js";
 import { monitorConfig } from "./monitorConfig.js";
 
+/**
+ * Make a read-only Soroban contract call via RPC simulation.
+ *
+ * Uses `rpc.Server.queryContract`, which builds a simulated transaction
+ * (no signatures required) and returns the decoded return value.
+ *
+ * @param method  Contract function name (e.g. "get_contract_stats")
+ * @param args    Arguments object keyed by parameter name (empty for no-arg calls)
+ * @returns       Decoded native JS value from the contract's return ScVal
+ */
+async function readContract<T = unknown>(method: string, args: Record<string, unknown> = {}): Promise<T> {
+  const { result } = await rpcServer.queryContract(config.STELLAR_CONTRACT_ID, method, args);
+  return result as T;
+}
+
 const envSchema = z.object({
   HOST: z.string().default("127.0.0.1"),
   PORT: z.coerce.number().int().positive().default(8787),
