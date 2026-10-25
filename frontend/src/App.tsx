@@ -94,6 +94,7 @@ function App() {
   const [shipments, setShipments] = useState<Shipment[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [events, setEvents] = useState<Escalation[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
   const [apiState, setApiState] = useState<"checking" | "online" | "offline">("checking");
   const [loading, setLoading] = useState(false);
   const [writing, setWriting] = useState(false);
@@ -542,6 +543,7 @@ function App() {
               <div className="metric-value">{shipment ? shipment.open_disputes : "—"}</div>
               <div className="metric-foot">{shipment ? t("metrics.onTracked") : t("metrics.noShipment")}</div>
             </article>
+            </>}
             <article className="metric">
               <div className="metric-top"><span>{t("metrics.networkStatus")}</span><span className="metric-icon amber-icon"><Activity size={16} /></span></div>
               <div className="metric-value status-metric">{apiState === "online" ? t("metrics.operational") : apiState === "offline" ? t("metrics.disconnected") : t("metrics.checking")}</div>
@@ -648,6 +650,7 @@ function App() {
                 <tbody>{shipments.length ? shipments.map((row) => <tr key={row.id} className={selectedIds.includes(row.id) ? "row-selected" : ""}><td className="select-cell"><input type="checkbox" aria-label={`Select shipment ${row.id}`} checked={selectedIds.includes(row.id)} disabled={writing} onChange={() => toggleSelected(row.id)} /></td><td><button className="table-id table-link" onClick={() => openShipment(row.id)}><span className="table-file"><FileSearch size={14} /></span>{row.id}</button></td><td><StatusPill status={row.status} /></td><td>{amount(row.total_amount)} <span className="muted">units</span></td><td>{row.milestone_count}</td><td>{row.open_disputes > 0 ? <span className="dispute-count">{row.open_disputes} open</span> : "None"}</td><td>{row.created_at.toLocaleString()}</td></tr>) : <tr><td colSpan={7} className="table-empty">No shipment loaded. Search above to view a contract record.</td></tr>}</tbody>
               </table>
             </div>
+            <Pagination label="Shipment records" page={viewedPages.page} pageCount={viewedPages.pageCount} onPageChange={viewedPages.setPage} />
           </section>
           </>}
 
