@@ -287,6 +287,22 @@ app.get<{ Params: { id: string } }>("/api/shipments/:id/warranty", async (reques
   }
 });
 
+app.get<{ Querystring: { buyer?: string; address?: string } }>("/api/standing-orders", async (request) => {
+  const buyer = (request.query.buyer ?? request.query.address ?? "").trim();
+  if (!buyer) {
+    return [];
+  }
+  return listBuyerStandingOrders(buyer);
+});
+
+app.get<{ Params: { address: string } }>("/api/standing-orders/:address", async (request, reply) => {
+  const buyer = request.params.address.trim();
+  if (!buyer) {
+    return reply.code(400).send({ error: "invalid_buyer_address" });
+  }
+  return listBuyerStandingOrders(buyer);
+});
+
 app.get<{ Params: { shipmentId: string } }>("/api/metadata/:shipmentId", async (request) => {
   const rows = database.prepare(`
     SELECT metadata_key AS key, value, updated_at AS updatedAt
