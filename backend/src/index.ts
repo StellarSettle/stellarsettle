@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { scValToNative, rpc, xdr } from "@stellar/stellar-sdk";
 import { z } from "zod";
 
@@ -22,31 +23,37 @@ const envSchema = z.object({
 });
 
 const config = envSchema.parse(process.env);
-const databasePath = resolve(config.DATABASE_PATH);
-mkdirSync(dirname(databasePath), { recursive: true });
+const databasePath = config.DATABASE_PATH === ":memory:" ? ":memory:" : resolve(config.DATABASE_PATH);
+if (databasePath !== ":memory:") {
+  mkdirSync(dirname(databasePath), { recursive: true });
+}
 
-const database = new DatabaseSync(databasePath);
-database.exec(`
-  PRAGMA journal_mode = WAL;
-  CREATE TABLE IF NOT EXISTS contract_events (
-    id TEXT PRIMARY KEY,
-    ledger INTEGER NOT NULL,
-    event_type TEXT NOT NULL,
-    shipment_id TEXT,
-    payload TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX IF NOT EXISTS contract_events_ledger_idx ON contract_events(ledger DESC);
-  CREATE TABLE IF NOT EXISTS shipment_metadata (
-    shipment_id TEXT NOT NULL,
-    metadata_key TEXT NOT NULL,
-    value TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (shipment_id, metadata_key)
-  );
-`);
+export function initDatabase(db: DatabaseSync): void {
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS contract_events (
+      id TEXT PRIMARY KEY,
+      ledger INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      shipment_id TEXT,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS contract_events_ledger_idx ON contract_events(ledger DESC);
+    CREATE TABLE IF NOT EXISTS shipment_metadata (
+      shipment_id TEXT NOT NULL,
+      metadata_key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (shipment_id, metadata_key)
+    );
+  `);
+}
 
-type EscalationEvent = {
+export const database = new DatabaseSync(databasePath);
+initDatabase(database);
+
+export type EscalationEvent = {
   id: string;
   ledger: number;
   type: "dispute_escalated";
@@ -319,7 +326,8 @@ app.get("/api/stream", async (request, reply) => {
     "access-control-allow-origin": config.WEB_ORIGIN,
   });
   response.write(": connected\n\n");
-  const writeEvent = (event: EscalationEvent) => response.write(`id: ${event.id}\nevent: dispute_escalated\ndata: ${JSON.stringify(event)}\n\n`);
+  const writeEvent = (event: ContractEvent) =>
+    response.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   streams.add(writeEvent);
   const heartbeat = setInterval(() => response.write(": keepalive\n\n"), 20_000);
   request.raw.on("close", () => {
@@ -478,27 +486,7 @@ async function scanEvents(): Promise<void> {
         : await rpcServer.getEvents({ startLedger, endLedger: latestLedger, filters, limit: 100 });
 
       for (const event of page.events) {
-        const topics = event.topic.map((topic) => decodeScVal(topic));
-        if (topics[0] !== "dispute_escalated") continue;
-        const payload = decodeScVal(event.value);
-        if (!Array.isArray(payload) || payload.length < 3) continue;
-        const numbers = payload.slice(0, 3).map(Number);
-        if (numbers.some((number) => !Number.isFinite(number))) continue;
-        const [milestoneIndex, openedLedger, currentLedger] = numbers as [number, number, number];
-        const parsed: EscalationEvent = {
-          id: event.id,
-          ledger: event.ledger,
-          type: "dispute_escalated",
-          shipmentId: String(topics[1] ?? ""),
-          milestoneIndex,
-          openedLedger,
-          currentLedger,
-        };
-        const inserted = database.prepare(`
-          INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(parsed.id, parsed.ledger, parsed.type, parsed.shipmentId, JSON.stringify(parsed));
-        if (Number(inserted.changes) > 0) streams.forEach((write) => write(parsed));
+        handleContractEvent(event);
       }
 
       hasMore = page.events.length === 100 && page.cursor !== cursor;
@@ -513,11 +501,6 @@ async function scanEvents(): Promise<void> {
   } finally {
     pollRunning = false;
   }
-}
-
-if (config.STELLAR_CONTRACT_ID) {
-  await scanEvents();
-  pollTimer = setInterval(() => void scanEvents(), config.POLL_INTERVAL_MS);
 }
 
 app.addHook("onClose", async () => {

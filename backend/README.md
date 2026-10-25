@@ -1,6 +1,6 @@
 # StellarSettle Backend
 
-Node.js API and Soroban RPC event monitor for shipment escalation alerts and off-chain shipment metadata.
+Node.js API and Soroban RPC event monitor for shipment escalation alerts, lifecycle events (`shipment_completed`, `shipment_cancelled`), and off-chain shipment metadata.
 
 ## Local setup
 
@@ -10,12 +10,13 @@ npm install
 npm run dev
 ```
 
-Set `STELLAR_CONTRACT_ID` to enable the event monitor. By default, it scans recent contract events on Testnet and persists `dispute_escalated` alerts and metadata in a local SQLite database. The API exposes `GET /api/health`, `GET /api/events`, `GET /api/stream` (SSE), shipment endpoints, and metadata read/write endpoints. Metadata writes are disabled until a non-empty `METADATA_API_KEY` is configured; keep that key on the server and never expose it in frontend variables.
+Set `STELLAR_CONTRACT_ID` to enable the event monitor. By default, it scans recent contract events on Testnet and persists `dispute_escalated`, `shipment_completed`, and `shipment_cancelled` events as well as metadata in a local SQLite database. The API exposes `GET /api/health`, `GET /api/events`, `GET /api/stream` (SSE), shipment endpoints, and metadata read/write endpoints. Metadata writes are disabled until a non-empty `METADATA_API_KEY` is configured; keep that key on the server and never expose it in frontend variables.
 
 The event monitor starts from the latest ledger minus ten when `START_LEDGER` is unset. Configure a ledger explicitly when recovering an older range. This service does not sign or submit contract transactions; the connected wallet remains responsible for user-authorized actions.
 
 ```sh
 npm run typecheck
+npm test
 npm run build
 npm start
 ```
@@ -25,8 +26,8 @@ npm start
 ### Health & Events
 
 - **GET /api/health** — Check service status, network, and event monitor state
-- **GET /api/events** — Retrieve paginated `dispute_escalated` events (query params: `after` ledger, `limit` max 100)
-- **GET /api/stream** — Server-Sent Events stream of new disputes (SSE)
+- **GET /api/events** — Retrieve paginated `dispute_escalated`, `shipment_completed`, and `shipment_cancelled` events (query params: `after` ledger, `limit` max 100, optional `type` and `shipmentId`)
+- **GET /api/stream** — Server-Sent Events stream of contract events (SSE)
 
 ### Shipments
 
