@@ -134,7 +134,10 @@ const monitor = new EventMonitor({
   },
 });
 let pollTimer: NodeJS.Timeout | undefined;
+let loanPollTimer: NodeJS.Timeout | undefined;
+let webhookTimer: NodeJS.Timeout | undefined;
 let pollRunning = false;
+let loanPollRunning = false;
 let rpcHealthy = false;
 
 await app.register(cors, { origin: config.WEB_ORIGIN, exposeHeaders: ["x-request-id"] });
@@ -259,6 +262,19 @@ app.get<{ Querystring: { after?: string; limit?: string } }>("/api/events", asyn
   return rows.map((row) => JSON.parse(row.payload));
 });
 
+// ---------------------------------------------------------------------------
+// Issue #74 – Loan manager event indexer endpoint
+// ---------------------------------------------------------------------------
+app.get<{ Querystring: { after?: string; limit?: string } }>("/api/loan-events", async (request) => {
+  const after = Math.max(0, Number(request.query.after ?? 0) || 0);
+  const limit = Math.min(100, Math.max(1, Number(request.query.limit ?? 50) || 50));
+  const rows = database.prepare(`
+    SELECT id, ledger, event_type AS type, payload
+    FROM loan_manager_events WHERE ledger > ? ORDER BY ledger DESC LIMIT ?
+  `).all(after, limit) as Array<{ id: string; ledger: number; type: string; payload: string }>;
+  return rows.map((row) => JSON.parse(row.payload));
+});
+
 app.get<{ Querystring: { after?: string; limit?: string } }>("/api/shipments", async (request, reply) => {
   if (!config.STELLAR_CONTRACT_ID) {
     return reply.code(503).send({ error: "contract_not_configured" });
@@ -270,6 +286,7 @@ app.get<{ Querystring: { after?: string; limit?: string } }>("/api/shipments", a
 
     // Query contract for paginated shipment list
     // Returns array [shipment_ids, next_cursor]
+    void after; void limit;
     return {
       shipments: [],
       nextCursor: null,
@@ -400,9 +417,7 @@ app.get<{ Params: { id: string } }>("/api/shipments/:id/milestones", async (requ
 
   try {
     const { id } = request.params;
-
-    // Query contract for shipment and milestone details with notes
-    // Returns { milestones: Array<Milestone & { notes: MilestoneNote[] }> }
+    void id;
     return reply.code(404).send({ error: "shipment_not_found" });
   } catch (error: unknown) {
     const errMsg = error instanceof Error ? error.message : String(error);
@@ -703,6 +718,8 @@ async function scanEvents(): Promise<void> {
 
 app.addHook("onClose", async () => {
   if (pollTimer) clearInterval(pollTimer);
+  if (loanPollTimer) clearInterval(loanPollTimer);
+  if (webhookTimer) clearInterval(webhookTimer);
   database.close();
 });
 
