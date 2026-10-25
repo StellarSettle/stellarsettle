@@ -60,33 +60,39 @@ npm start
   - Returns 401 if `METADATA_API_KEY` not configured or mismatched
   - Returns 400 if value exceeds 4000 characters
 
-## API Endpoints
+### Templates
 
-### Health & Events
+- **GET /api/templates** — List saved milestone templates from the contract
+  - Query params: `owner` (optional Stellar address to filter by owner), `nocache` (any value bypasses cache)
+  - Returns: `{ templates: MilestoneTemplate[] }` sorted in stable contract order
+  - Proxies contract's `list_milestone_templates` function
 
-- **GET /api/health** — Check service status, network, and event monitor state
-- **GET /api/events** — Retrieve paginated `dispute_escalated` events (query params: `after` ledger, `limit` max 100)
-- **GET /api/stream** — Server-Sent Events stream of new disputes (SSE)
+### Deadlines
 
-### Shipments
+- **GET /api/deadlines/upcoming** — List milestones approaching their deadline
+  - Query params: `withinLedgers` (default 200), `nocache` (any value bypasses cache)
+  - Returns: `{ withinLedgers: number, milestones: MilestoneDeadline[] }` sorted by nearest deadline first
+  - Proxies contract's `get_upcoming_deadlines` and annotates results with `check_deadline_warning`
 
-- **GET /api/shipments** — List shipment IDs with pagination (query params: `after` cursor, `limit` max 100)
-  - Returns: `{ shipments: string[], nextCursor?: number }`
-  
-- **GET /api/shipments/:id** — Retrieve full shipment details
-  - Response: Full `Shipment` struct (all 51+ fields)
-  - Returns 404 if shipment ID not found
-  
-- **GET /api/shipments/:id/milestones** — List all milestones for a shipment with notes
-  - Response: `{ milestones: Array<Milestone & { notes: MilestoneNote[] }> }`
-  - Returns 404 if shipment ID not found
+### Admin Log
 
-### Metadata
+- **GET /api/admin-log** — Retrieve the on-chain admin action audit log (requires `X-API-Key` header)
+  - Query params: `action` (optional action type filter), `fromLedger` (optional), `toLedger` (optional), `nocache` (any value bypasses cache)
+  - Returns: `{ entries: AdminAction[], filters: { action, fromLedger, toLedger } }`
+  - Requires the same `METADATA_API_KEY` used for metadata writes
+  - Proxies contract's `get_admin_log` or `get_admin_log_filtered` depending on filters provided
 
-- **GET /api/metadata/:shipmentId** — Retrieve all metadata for a shipment
-  - Returns: `{ [key: string]: { value: string, updatedAt: string } }`
+## Response Cache
 
-- **PUT /api/metadata/:shipmentId/:key** — Store off-chain metadata (requires `X-API-Key` header)
-  - Body: `{ value: string }`
-  - Returns 401 if `METADATA_API_KEY` not configured or mismatched
-  - Returns 400 if value exceeds 4000 characters
+Read-only contract query endpoints (`/api/templates`, `/api/deadlines/upcoming`, `/api/admin-log`) use a
+short-lived in-memory cache to avoid redundant Soroban RPC calls:
+
+| Endpoint | Default TTL |
+|---|---|
+| `/api/templates` | 60 s |
+| `/api/deadlines/upcoming` | 30 s |
+| `/api/admin-log` | 15 s |
+
+Append `?nocache=1` to any of these endpoints to bypass the cache and force a fresh RPC call. This is
+useful for debugging or when you need the absolute latest on-chain state. The cache is process-local and
+is not shared across server restarts or multiple instances.

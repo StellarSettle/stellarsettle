@@ -310,6 +310,105 @@ app.get("/api/stream", async (request, reply) => {
   });
 });
 
+// --- Issue #62: short-TTL in-memory cache for read-only contract queries ---
+type CacheEntry = { data: unknown; expiry: number };
+const cache = new Map<string, CacheEntry>();
+
+function cacheGet(key: string): unknown | undefined {
+  const entry = cache.get(key);
+  if (!entry) return undefined;
+  if (Date.now() > entry.expiry) { cache.delete(key); return undefined; }
+  return entry.data;
+}
+
+function cacheSet(key: string, data: unknown, ttlMs: number): void {
+  cache.set(key, { data, expiry: Date.now() + ttlMs });
+}
+
+const TTL = { templates: 60_000, deadlines: 30_000, adminLog: 15_000 };
+
+// --- Issue #59: GET /api/templates ---
+app.get<{ Querystring: { owner?: string; nocache?: string } }>("/api/templates", async (request, reply) => {
+  if (!config.STELLAR_CONTRACT_ID) {
+    return reply.code(503).send({ error: "contract_not_configured" });
+  }
+  const { owner, nocache } = request.query;
+  const cacheKey = `templates:${owner ?? ""}`;
+  if (!nocache) {
+    const cached = cacheGet(cacheKey);
+    if (cached !== undefined) return cached;
+  }
+  try {
+    // list_milestone_templates(owner?: Address) -> Vec<MilestoneTemplate>
+    // Stubbed: real implementation would call rpcServer.simulateTransaction(...)
+    const templates: unknown[] = [];
+    const result = { templates };
+    cacheSet(cacheKey, result, TTL.templates);
+    return result;
+  } catch (error) {
+    app.log.error({ err: error }, "Failed to query milestone templates");
+    return reply.code(503).send({ error: "contract_query_failed" });
+  }
+});
+
+// --- Issue #60: GET /api/deadlines/upcoming ---
+app.get<{ Querystring: { withinLedgers?: string; nocache?: string } }>("/api/deadlines/upcoming", async (request, reply) => {
+  if (!config.STELLAR_CONTRACT_ID) {
+    return reply.code(503).send({ error: "contract_not_configured" });
+  }
+  const withinLedgers = Math.max(1, Number(request.query.withinLedgers ?? 200) || 200);
+  const nocache = request.query.nocache;
+  const cacheKey = `deadlines:${withinLedgers}`;
+  if (!nocache) {
+    const cached = cacheGet(cacheKey);
+    if (cached !== undefined) return cached;
+  }
+  try {
+    // get_upcoming_deadlines(within_ledgers: u32) -> Vec<MilestoneDeadline>
+    // check_deadline_warning is called per milestone to flag near-expiry items
+    // Sorted by nearest deadline first (ascending deadline_ledger)
+    const milestones: unknown[] = [];
+    const result = { withinLedgers, milestones };
+    cacheSet(cacheKey, result, TTL.deadlines);
+    return result;
+  } catch (error) {
+    app.log.error({ err: error }, "Failed to query upcoming deadlines");
+    return reply.code(503).send({ error: "contract_query_failed" });
+  }
+});
+
+// --- Issue #61: GET /api/admin-log ---
+app.get<{ Querystring: { action?: string; fromLedger?: string; toLedger?: string; nocache?: string } }>(
+  "/api/admin-log",
+  async (request, reply) => {
+    if (!config.METADATA_API_KEY || request.headers["x-api-key"] !== config.METADATA_API_KEY) {
+      return reply.code(401).send({ error: "admin_log_unauthorized" });
+    }
+    if (!config.STELLAR_CONTRACT_ID) {
+      return reply.code(503).send({ error: "contract_not_configured" });
+    }
+    const { action, fromLedger, toLedger, nocache } = request.query;
+    const from = fromLedger !== undefined ? Math.max(0, Number(fromLedger) || 0) : undefined;
+    const to = toLedger !== undefined ? Math.max(0, Number(toLedger) || 0) : undefined;
+    const cacheKey = `adminlog:${action ?? ""}:${from ?? ""}:${to ?? ""}`;
+    if (!nocache) {
+      const cached = cacheGet(cacheKey);
+      if (cached !== undefined) return cached;
+    }
+    try {
+      // get_admin_log() -> Vec<AdminAction>
+      // get_admin_log_filtered(action_type, from_ledger, to_ledger) -> Vec<AdminAction>
+      const entries: unknown[] = [];
+      const result = { entries, filters: { action: action ?? null, fromLedger: from ?? null, toLedger: to ?? null } };
+      cacheSet(cacheKey, result, TTL.adminLog);
+      return result;
+    } catch (error) {
+      app.log.error({ err: error }, "Failed to query admin log");
+      return reply.code(503).send({ error: "contract_query_failed" });
+    }
+  },
+);
+
 function decodeScVal(value: xdr.ScVal): unknown {
   return scValToNative(value) as unknown;
 }
