@@ -1,6 +1,9 @@
 import "dotenv/config";
 import cors from "@fastify/cors";
-import Fastify from "fastify";
+import rateLimit from "@fastify/rate-limit";
+import swagger from "@fastify/swagger";
+import swaggerUi from "@fastify/swagger-ui";
+import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
@@ -27,6 +30,10 @@ async function readContract<T = unknown>(method: string, args: Record<string, un
   return result as T;
 }
 
+// ---------------------------------------------------------------------------
+// Environment schema
+// ---------------------------------------------------------------------------
+
 const envSchema = z.object({
   HOST: z.string().default("127.0.0.1"),
   PORT: z.coerce.number().int().positive().default(8787),
@@ -38,6 +45,10 @@ const envSchema = z.object({
   DATABASE_PATH: z.string().default("./data/stellarsettle.sqlite"),
   METADATA_API_KEY: z.string().default(""),
   WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
+  // Issue #65: rate-limit env vars
+  RATE_LIMIT_READ_MAX: z.coerce.number().int().positive().default(100),
+  RATE_LIMIT_WRITE_MAX: z.coerce.number().int().positive().default(30),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 const config = envSchema.parse(process.env);
@@ -269,21 +280,113 @@ app.get<{ Querystring: { after?: string; limit?: string } }>("/api/shipments", a
   }
 });
 
-app.get<{ Params: { id: string } }>("/api/shipments/:id", async (request, reply) => {
-  if (!config.STELLAR_CONTRACT_ID) {
-    return reply.code(503).send({ error: "contract_not_configured" });
-  }
+await app.register(swaggerUi, {
+  routePrefix: "/api/docs",
+  uiConfig: { docExpansion: "list", deepLinking: false },
+  staticCSP: true,
+  transformSpecificationClone: true,
+});
 
-  try {
-    const { id } = request.params;
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
 
-    // Query contract for full shipment details
-    // Returns Shipment struct
-    return reply.code(404).send({ error: "shipment_not_found" });
-  } catch (error: unknown) {
-    const errMsg = error instanceof Error ? error.message : String(error);
-    if (errMsg.includes("shipment not found")) {
-      return reply.code(404).send({ error: "shipment_not_found" });
+app.get(
+  "/api/health",
+  {
+    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+    schema: {
+      tags: ["health"],
+      summary: "Service health",
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            status: { type: "string" },
+            network: { type: "string" },
+            contractConfigured: { type: "boolean" },
+            eventMonitor: { type: "string" },
+            lastScannedLedger: { type: ["integer", "null"] },
+          },
+        },
+      },
+    },
+  },
+  async () => ({
+    status: "ok",
+    network: config.STELLAR_NETWORK,
+    contractConfigured: Boolean(config.STELLAR_CONTRACT_ID),
+    eventMonitor: config.STELLAR_CONTRACT_ID ? (rpcHealthy ? "connected" : "connecting") : "disabled",
+    lastScannedLedger: lastScannedLedger ?? null,
+  }),
+);
+
+app.get<{ Querystring: { after?: string; limit?: string } }>(
+  "/api/events",
+  {
+    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+    schema: {
+      tags: ["events"],
+      summary: "List contract events",
+      querystring: {
+        type: "object",
+        properties: {
+          after: { type: "integer", minimum: 0, description: "Return events with ledger > after" },
+          limit: { type: "integer", minimum: 1, maximum: 100, description: "Max results (default 50)" },
+        },
+      },
+      response: { 200: { type: "array", items: { type: "object" } } },
+    },
+  },
+  async (request, reply) => {
+    const query = validateQuery(paginationSchema, request.query, reply);
+    if (!query) return;
+    const { after, limit } = query;
+    const rows = database
+      .prepare(
+        `SELECT id, ledger, event_type AS type, shipment_id AS shipmentId, payload
+         FROM contract_events WHERE ledger > ? ORDER BY ledger DESC LIMIT ?`,
+      )
+      .all(after, limit) as Array<{
+        id: string;
+        ledger: number;
+        type: string;
+        shipmentId: string;
+        payload: string;
+      }>;
+    return rows.map((row) => JSON.parse(row.payload));
+  },
+);
+
+app.get<{ Querystring: { after?: string; limit?: string } }>(
+  "/api/shipments",
+  {
+    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+    schema: {
+      tags: ["shipments"],
+      summary: "List shipments",
+      querystring: {
+        type: "object",
+        properties: {
+          after: { type: "integer", minimum: 0 },
+          limit: { type: "integer", minimum: 1, maximum: 100 },
+        },
+      },
+      response: {
+        200: {
+          type: "object",
+          properties: {
+            shipments: { type: "array", items: { type: "object" } },
+            nextCursor: { type: ["string", "null"] },
+          },
+        },
+        503: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  },
+  async (request, reply) => {
+    if (!config.STELLAR_CONTRACT_ID) {
+      return reply.code(503).send({ error: "contract_not_configured" });
     }
     request.log.error({ err: error }, "Failed to query shipment");
     return reply.code(503).send({ error: "contract_query_failed" });
@@ -365,21 +468,48 @@ app.get<{ Params: { shipmentId: string } }>("/api/metadata/:shipmentId", async (
 
 app.put<{ Params: { shipmentId: string; key: string }; Body: { value?: unknown } }>(
   "/api/metadata/:shipmentId/:key",
+  {
+    config: { rateLimit: { max: config.RATE_LIMIT_WRITE_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
+    schema: {
+      tags: ["metadata"],
+      summary: "Set a metadata key for a shipment (requires API key)",
+      security: [{ apiKey: [] }],
+      params: {
+        type: "object",
+        properties: {
+          shipmentId: { type: "string" },
+          key: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,64}$" },
+        },
+        required: ["shipmentId", "key"],
+      },
+      body: {
+        type: "object",
+        required: ["value"],
+        properties: { value: { type: "string", maxLength: 4000 } },
+      },
+      response: {
+        204: { type: "null" },
+        400: { type: "object", properties: { error: { type: "string" } } },
+        401: { type: "object", properties: { error: { type: "string" } } },
+      },
+    },
+  },
   async (request, reply) => {
     if (!config.METADATA_API_KEY || request.headers["x-api-key"] !== config.METADATA_API_KEY) {
       return reply.code(401).send({ error: "metadata_write_unauthorized" });
     }
-    const { shipmentId, key } = request.params;
-    const value = request.body?.value;
-    if (!shipmentId || !/^[a-zA-Z0-9_-]{1,64}$/.test(key) || typeof value !== "string" || value.length > 4000) {
-      return reply.code(400).send({ error: "invalid_metadata" });
-    }
-    database.prepare(`
-      INSERT INTO shipment_metadata (shipment_id, metadata_key, value, updated_at)
-      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(shipment_id, metadata_key)
-      DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    `).run(shipmentId, key, value);
+    const params = validateParams(metadataKeyParamSchema, request.params, reply);
+    if (!params) return;
+    const body = validateBody(metadataBodySchema, request.body, reply);
+    if (!body) return;
+    database
+      .prepare(
+        `INSERT INTO shipment_metadata (shipment_id, metadata_key, value, updated_at)
+         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT(shipment_id, metadata_key)
+         DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
+      )
+      .run(params.shipmentId, params.key, body.value);
     return reply.code(204).send();
   },
 );
