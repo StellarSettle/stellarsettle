@@ -2,12 +2,19 @@
 
 Node.js API and Soroban RPC event monitor for shipment escalation alerts, lifecycle events (`shipment_completed`, `shipment_cancelled`), and off-chain shipment metadata.
 
-## Local setup
+## Requirements
+
+- Node.js **≥ 22.5**
+- A deployed StellarSettle contract (optional — the server starts without one and
+  the event monitor is simply disabled)
+
+## Setup
 
 ```sh
 cp .env.example .env
+# Edit .env — at minimum set STELLAR_CONTRACT_ID
 npm install
-npm run dev
+npm run dev        # ts-node watch mode
 ```
 
 Set `STELLAR_CONTRACT_ID` to enable the event monitor. By default, it scans recent contract events on Testnet and persists `dispute_escalated`, `shipment_completed`, and `shipment_cancelled` events as well as metadata in a local SQLite database. The API exposes `GET /api/health`, `GET /api/events`, `GET /api/stream` (SSE), shipment endpoints, and metadata read/write endpoints. Metadata writes are disabled until a non-empty `METADATA_API_KEY` is configured; keep that key on the server and never expose it in frontend variables.
@@ -44,7 +51,7 @@ To recover a reported gap, use an RPC provider that still retains the required r
 
 ## API Endpoints
 
-### Health & Events
+## Environment variables
 
 - **GET /api/health** — Check service status, network, and event monitor state
 - **GET /api/events** — Retrieve paginated `dispute_escalated`, `shipment_completed`, and `shipment_cancelled` events (query params: `after` ledger, `limit` max 100, optional `type` and `shipmentId`)
@@ -62,19 +69,57 @@ To recover a reported gap, use an RPC provider that still retains the required r
 
 ### Shipments
 
-- **GET /api/shipments** — List shipment IDs with pagination (query params: `after` cursor, `limit` max 100)
-  - Returns: `{ shipments: string[], nextCursor?: number }`
-  - Description: Proxies contract's `list_shipments` function with pagination support matching `/api/events` style
-  
-- **GET /api/shipments/:id** — Retrieve full shipment details
-  - Response: Full `Shipment` struct (all 51+ fields)
-  - Returns 404 if shipment ID not found
-  - Description: Reads full shipment state via Soroban RPC
-  
-- **GET /api/shipments/:id/milestones** — List all milestones for a shipment with notes
-  - Response: `{ milestones: Array<Milestone & { notes: MilestoneNote[] }> }`
-  - Returns 404 if shipment ID not found
-  - Description: Returns milestone list with status, proof hash, and associated notes for each milestone
+All shipment routes proxy Soroban RPC calls to the deployed contract. They
+return `503 { "error": "contract_not_configured" }` when `STELLAR_CONTRACT_ID`
+is not set.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/shipments` | None | List shipment IDs with cursor-based pagination. Proxies the contract's `list_shipments` function. |
+| `GET` | `/api/shipments/:id` | None | Retrieve the full `Shipment` struct for a single shipment by its ID. Returns `404` if not found. |
+| `GET` | `/api/shipments/:id/milestones` | None | Retrieve all milestones for a shipment, each annotated with their associated on-chain notes. Returns `404` if not found. |
+
+**`GET /api/shipments` query parameters**
+
+| Param | Default | Description |
+|---|---|---|
+| `after` | `0` | Cursor returned by the previous page (the numeric index into the shipment list). |
+| `limit` | `50` | Maximum IDs to return per page. Capped at `100`. |
+
+**`GET /api/shipments` response**
+
+```json
+{
+  "shipments": ["SHIP-001", "SHIP-002"],
+  "nextCursor": 10
+}
+```
+
+`nextCursor` is `null` when the last page has been reached.
+
+**`GET /api/shipments/:id` response**
+
+Returns the full `Shipment` struct as returned by the contract's `get_shipment`
+function (buyer, supplier, logistics, arbiter, token, amounts, milestones,
+status, timestamps, dispute configuration, etc.).
+
+**`GET /api/shipments/:id/milestones` response**
+
+```json
+{
+  "milestones": [
+    {
+      "name": "Goods Dispatched",
+      "payment_percent": 25,
+      "proof_hash": "bafybeih...",
+      "status": "Confirmed",
+      "notes": []
+    }
+  ]
+}
+```
+
+---
 
 - **GET /api/shipments/:id/warranty** — Retrieve warranty status and any filed claim for a shipment
   - Response: `{ warrantyEndLedger: number | null, balance: string | null, claim: WarrantyClaim | null }`
@@ -84,13 +129,13 @@ To recover a reported gap, use an RPC provider that still retains the required r
 
 ### Metadata
 
-- **GET /api/metadata/:shipmentId** — Retrieve all metadata for a shipment
-  - Returns: `{ [key: string]: { value: string, updatedAt: string } }`
+Off-chain key/value pairs attached to a shipment. Reads are public; writes
+require the `X-Api-Key` header matching `METADATA_API_KEY`.
 
-- **PUT /api/metadata/:shipmentId/:key** — Store off-chain metadata (requires `X-API-Key` header)
-  - Body: `{ value: string }`
-  - Returns 401 if `METADATA_API_KEY` not configured or mismatched
-  - Returns 400 if value exceeds 4000 characters
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `GET` | `/api/metadata/:shipmentId` | None | Retrieve all metadata entries for a shipment. Returns an empty object `{}` when none exist. |
+| `PUT` | `/api/metadata/:shipmentId/:key` | `X-Api-Key` | Store or overwrite a single metadata value. |
 
 ### Templates
 
