@@ -1,7 +1,7 @@
 # StellarSettle Monorepo
 ![CI](https://github.com/shakurJJ/stellarsettle-contract/actions/workflows/ci.yml/badge.svg)
 ![codecov](https://codecov.io/gh/shakurJJ/stellarsettle-contract/branch/main/graph/badge.svg)
-
+....
 > **Milestone-based supply chain escrow on Stellar Soroban**
 > StellarSettle is a Soroban smart contract that locks buyer payment in escrow and automatically releases funds to the supplier as each delivery milestone is confirmed on-chain. No middlemen, no delayed wire transfers, no trust required.
 >
