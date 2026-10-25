@@ -720,9 +720,30 @@ async function scanEvents(): Promise<void> {
 
     lastScannedLedger = latestLedger;
     rpcHealthy = true;
+    for (const event of response.events) {
+      const payload = decodeScVal(event.value) as Record<string, unknown>;
+      const shipmentId = String(payload.shipmentId ?? payload.shipment_id ?? "");
+      const escalation: EscalationEvent = {
+        id: event.id,
+        ledger: event.ledger,
+        type: "dispute_escalated",
+        shipmentId,
+        milestoneIndex: Number(payload.milestoneIndex ?? payload.milestone_index ?? 0),
+        openedLedger: Number(payload.openedLedger ?? payload.opened_ledger ?? event.ledger),
+        currentLedger: event.ledger,
+      };
+      database.prepare(`
+        INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(escalation.id, escalation.ledger, escalation.type, shipmentId, JSON.stringify(escalation));
+      for (const stream of streams) {
+        stream(escalation);
+      }
+    }
+    lastScannedLedger = latest.sequence;
   } catch (error) {
     rpcHealthy = false;
-    app.log.error({ err: error }, "Soroban RPC event poll failed");
+    app.log.error({ err: error }, "contract event poll failed");
   } finally {
     pollRunning = false;
   }
@@ -733,7 +754,7 @@ app.addHook("onClose", async () => {
   if (loanPollTimer) clearInterval(loanPollTimer);
   if (webhookTimer) clearInterval(webhookTimer);
   database.close();
-});
+}
 
 try {
   await app.listen({ host: config.HOST, port: config.PORT });

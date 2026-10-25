@@ -21,6 +21,14 @@ Set `STELLAR_CONTRACT_ID` to enable the event monitor. By default, it scans rece
 
 The event monitor resumes from a SQLite checkpoint on restart and automatically backfills missed, retained ledgers. This service does not sign or submit contract transactions; the connected wallet remains responsible for user-authorized actions.
 
+## Lending (loan_manager) read API
+
+Read-only endpoints backed by the `contracts/loan_manager` indexer and Soroban RPC reads. They follow the same validation and pagination conventions as the escrow endpoints (`limit`/`cursor` query params, `400` on invalid input).
+
+- `GET /api/lending/pool` — current pool state (total deposits, outstanding principal, utilization) read from on-chain `loan_manager` state.
+- `GET /api/lending/positions/:address` — a borrower's position for the given Stellar address; `400` if the address is malformed.
+- `GET /api/lending/liquidations` — paginated liquidation history from the indexer, using `limit` and `cursor` like `GET /api/events`.
+
 ```sh
 npm run typecheck
 npm test
