@@ -14,7 +14,7 @@
     "@stellar/freighter-api": "^6.0.1",
     "@stellar/stellar-sdk": "^17.2.1",
     "i18next": "^23.16.8",
-    "lucide-react": "^0.468.0",
+    "lucide-react": "^1.61.0",
     "react": "^19.3.1",
     "react-dom": "^19.1.0"
   },
