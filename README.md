@@ -2453,6 +2453,10 @@ stellarsettle/
 ├── frontend/                          ← React + Freighter operations dashboard
 │   ├── src/
 │   └── .env.example
+├── scripts/                           ← CLI helpers for common contract calls
+├── bindings/                          ← generated TypeScript contract clients
+│   ├── stellarsettle/
+│   └── loan_manager/
 └── contracts/
   ├── stellarsettle/                 ← milestone escrow contract crate
   │   ├── Cargo.toml
@@ -2531,6 +2535,36 @@ cd stellarsettle-contract
 # Check every crate in the workspace
 cargo check --workspace
 ```
+
+### CLI helper scripts
+
+`scripts/` wraps the most common contract calls so you don't have to hand-write
+`stellar contract invoke` argument lists. Each script takes `--contract-id`,
+`--network` and `--source` (or `STELLARSETTLE_CONTRACT_ID`, `STELLAR_NETWORK`,
+`STELLAR_ACCOUNT`), supports `--dry-run` and documents itself with `--help`:
+
+```bash
+scripts/create-shipment.sh --help
+scripts/submit-proof.sh --help
+scripts/confirm-milestone.sh --help
+scripts/get-shipment.sh --help
+```
+
+See [scripts/README.md](scripts/README.md) for a full testnet walkthrough.
+
+### TypeScript bindings
+
+Typed clients for both contracts live in [`bindings/stellarsettle`](bindings/stellarsettle) and
+[`bindings/loan_manager`](bindings/loan_manager). They are generated with
+`stellar contract bindings typescript` and build as standalone npm packages.
+Regenerate them after any contract change:
+
+```bash
+scripts/generate-bindings.sh                  # both contracts, from local WASM builds
+scripts/generate-bindings.sh loan_manager     # a single contract
+```
+
+See [bindings/README.md](bindings/README.md) for usage and for generating from a deployed contract ID.
 
 ### Frontend and Backend
 
@@ -2667,21 +2701,33 @@ stellar contract invoke \
 
 Create a test shipment via CLI
 
+The helper scripts in `scripts/` build the full `create_shipment` argument list
+(every `Milestone` and `ShipmentOptions` field) for you:
+
 ```bash
-stellar contract invoke \
-  --id <CONTRACT_ID> \
-  --source my-account \
-  --network testnet \
-  -- create_shipment \
-  --shipment_id "SHIP-001" \
-  --buyer <BUYER_ADDRESS> \
+export STELLARSETTLE_CONTRACT_ID=<CONTRACT_ID>
+export STELLAR_NETWORK=testnet
+
+# Buyer (my-account) locks 1,000 USDC in escrow across three milestones
+scripts/create-shipment.sh --source my-account \
+  --id SHIP-001 \
   --supplier <SUPPLIER_ADDRESS> \
   --logistics <LOGISTICS_ADDRESS> \
   --arbiter <ARBITER_ADDRESS> \
   --token <USDC_SAC_ADDRESS> \
-  --total_amount 1000000000 \
-  --milestones '[{"name":"Dispatch","payment_percent":25,"proof_hash":"","status":"Pending"},{"name":"Transit","payment_percent":50,"proof_hash":"","status":"Pending"},{"name":"Delivered","payment_percent":25,"proof_hash":"","status":"Pending"}]'
+  --amount 1000000000 \
+  --milestones "Dispatch:25,Transit:50,Delivered:25"
+
+# Supplier submits proof for milestone 0, then the buyer confirms it
+scripts/submit-proof.sh --source supplier-account --id SHIP-001 --milestone 0 --proof-hash ipfs://bafy...
+scripts/confirm-milestone.sh --source my-account --id SHIP-001 --milestone 0
+
+# Read the shipment back (simulation only)
+scripts/get-shipment.sh --source my-account --id SHIP-001
 ```
+
+Add `--dry-run` to any script to print the underlying `stellar contract invoke`
+command. See [scripts/README.md](scripts/README.md) for all options.
 
 ---
 
