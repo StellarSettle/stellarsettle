@@ -2554,8 +2554,9 @@ See [scripts/README.md](scripts/README.md) for a full testnet walkthrough.
 
 ### TypeScript bindings
 
-Typed clients for both contracts live in [`bindings/stellarsettle`](bindings/stellarsettle) and
-[`bindings/loan_manager`](bindings/loan_manager). They are generated with
+Typed clients for the contracts live under [`bindings/`](bindings) (currently
+[`bindings/loan_manager`](bindings/loan_manager); `bindings/stellarsettle` is produced by the same
+command once that contract compiles again). They are generated with
 `stellar contract bindings typescript` and build as standalone npm packages.
 Regenerate them after any contract change:
 
