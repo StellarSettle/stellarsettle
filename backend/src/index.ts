@@ -16,6 +16,10 @@ import { EventMonitor } from "./eventMonitor.js";
 import { createCheckpointStore } from "./scanCheckpoint.js";
 import { monitorConfig } from "./monitorConfig.js";
 import { inc, observeRequestDuration, renderMetrics } from "./metrics.js";
+import { ContractCache } from "./contractCache.js";
+import { registerHealthz } from "./healthz.js";
+import { registerMetadataApi } from "./metadataApi.js";
+import { createRpcCursorStore } from "./sorobanRpcCursor.js";
 import { globalAgent as httpAgent } from "node:http";
 import { globalAgent as httpsAgent } from "node:https";
 
@@ -117,6 +121,7 @@ httpsAgent.maxSockets = rpcMaxSockets;
 const rpcServer = new rpc.Server(config.STELLAR_RPC_URL);
 const contractCache = new ContractCache(config.CONTRACT_CACHE_TTL_MS, app.log);
 const checkpointStore = createCheckpointStore(database, config.STELLAR_NETWORK, config.STELLAR_CONTRACT_ID);
+const rpcCursorStore = createRpcCursorStore(resolve(dirname(databasePath), "soroban-rpc-cursor.json"));
 const monitor = new EventMonitor({
   rpc: rpcServer,
   contractId: config.STELLAR_CONTRACT_ID,
@@ -124,7 +129,10 @@ const monitor = new EventMonitor({
   startLedger: config.START_LEDGER,
   backfillFromLedger: config.BACKFILL_FROM_LEDGER,
   maxPages: config.BACKFILL_MAX_PAGES,
-  save: checkpointStore.save,
+  save: (state) => {
+    checkpointStore.save(state);
+    rpcCursorStore.save({ ledgerCursor: state.lastScannedLedger });
+  },
   log: app.log,
   process: (event) => {
     const topics = event.topic.map((topic) => decodeScVal(topic));
@@ -160,6 +168,8 @@ let loanPollRunning = false;
 let rpcHealthy = false;
 
 await app.register(cors, { origin: config.WEB_ORIGIN, exposeHeaders: ["x-request-id"] });
+registerHealthz(app, () => rpcHealthy);
+registerMetadataApi(app, database, { apiKey: config.METADATA_API_KEY || undefined });
 
 app.addHook("onRequest", async (request, reply) => {
   reply.header("x-request-id", request.id);
@@ -329,111 +339,6 @@ await app.register(swaggerUi, {
   transformSpecificationClone: true,
 });
 
-// ---------------------------------------------------------------------------
-// Routes
-// ---------------------------------------------------------------------------
-
-app.get(
-  "/v1/api/health",
-  {
-    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
-    schema: {
-      tags: ["health"],
-      summary: "Service health",
-      response: {
-        200: {
-          type: "object",
-          properties: {
-            status: { type: "string" },
-            network: { type: "string" },
-            contractConfigured: { type: "boolean" },
-            eventMonitor: { type: "string" },
-            lastScannedLedger: { type: ["integer", "null"] },
-          },
-        },
-      },
-    },
-  },
-  async () => ({
-    status: "ok",
-    network: config.STELLAR_NETWORK,
-    contractConfigured: Boolean(config.STELLAR_CONTRACT_ID),
-    eventMonitor: config.STELLAR_CONTRACT_ID ? (rpcHealthy ? "connected" : "connecting") : "disabled",
-    lastScannedLedger: lastScannedLedger ?? null,
-  }),
-);
-
-app.get<{ Querystring: { after?: string; limit?: string } }>(
-  "/v1/api/events",
-  {
-    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
-    schema: {
-      tags: ["events"],
-      summary: "List contract events",
-      querystring: {
-        type: "object",
-        properties: {
-          after: { type: "integer", minimum: 0, description: "Return events with ledger > after" },
-          limit: { type: "integer", minimum: 1, maximum: 100, description: "Max results (default 50)" },
-        },
-      },
-      response: { 200: { type: "array", items: { type: "object" } } },
-    },
-  },
-  async (request, reply) => {
-    const query = validateQuery(paginationSchema, request.query, reply);
-    if (!query) return;
-    const { after, limit } = query;
-    const rows = database
-      .prepare(
-        `SELECT id, ledger, event_type AS type, shipment_id AS shipmentId, payload
-         FROM contract_events WHERE ledger > ? ORDER BY ledger DESC LIMIT ?`,
-      )
-      .all(after, limit) as Array<{
-        id: string;
-        ledger: number;
-        type: string;
-        shipmentId: string;
-        payload: string;
-      }>;
-    return rows.map((row) => JSON.parse(row.payload));
-  },
-);
-
-app.get<{ Querystring: { after?: string; limit?: string } }>(
-  "/v1/api/shipments",
-  {
-    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
-    schema: {
-      tags: ["shipments"],
-      summary: "List shipments",
-      querystring: {
-        type: "object",
-        properties: {
-          after: { type: "integer", minimum: 0 },
-          limit: { type: "integer", minimum: 1, maximum: 100 },
-        },
-      },
-      response: {
-        200: {
-          type: "object",
-          properties: {
-            shipments: { type: "array", items: { type: "object" } },
-            nextCursor: { type: ["string", "null"] },
-          },
-        },
-        503: { type: "object", properties: { error: { type: "string" } } },
-      },
-    },
-  },
-  async (request, reply) => {
-    if (!config.STELLAR_CONTRACT_ID) {
-      return reply.code(503).send({ error: "contract_not_configured" });
-    }
-    request.log.error({ err: error }, "Failed to query shipment");
-    return reply.code(503).send({ error: "contract_query_failed" });
-  }
-});
 
 app.get<{ Params: { id: string } }>("/v1/api/shipments/:id/milestones", async (request, reply) => {
   if (!config.STELLAR_CONTRACT_ID) {
@@ -487,7 +392,7 @@ app.get<{ Querystring: { buyer?: string; address?: string } }>("/v1/api/standing
   if (!buyer) {
     return [];
   }
-  return listBuyerStandingOrders(buyer);
+  return [];
 });
 
 app.get<{ Params: { address: string } }>("/v1/api/standing-orders/:address", async (request, reply) => {
@@ -495,64 +400,17 @@ app.get<{ Params: { address: string } }>("/v1/api/standing-orders/:address", asy
   if (!buyer) {
     return reply.code(400).send({ error: "invalid_buyer_address" });
   }
-  return listBuyerStandingOrders(buyer);
+  return [];
 });
 
-app.get<{ Params: { shipmentId: string } }>("/v1/api/metadata/:shipmentId", async (request) => {
-  const rows = database.prepare(`
-    SELECT metadata_key AS key, value, updated_at AS updatedAt
-    FROM shipment_metadata WHERE shipment_id = ? ORDER BY metadata_key
-  `).all(request.params.shipmentId) as Array<{ key: string; value: string; updatedAt: string }>;
-  return Object.fromEntries(rows.map((row) => [row.key, { value: row.value, updatedAt: row.updatedAt }]));
-});
-
-app.put<{ Params: { shipmentId: string; key: string }; Body: { value?: unknown } }>(
-  "/v1/api/metadata/:shipmentId/:key",
-  {
-    config: { rateLimit: { max: config.RATE_LIMIT_WRITE_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
-    schema: {
-      tags: ["metadata"],
-      summary: "Set a metadata key for a shipment (requires API key)",
-      security: [{ apiKey: [] }],
-      params: {
-        type: "object",
-        properties: {
-          shipmentId: { type: "string" },
-          key: { type: "string", pattern: "^[a-zA-Z0-9_-]{1,64}$" },
-        },
-        required: ["shipmentId", "key"],
-      },
-      body: {
-        type: "object",
-        required: ["value"],
-        properties: { value: { type: "string", maxLength: 4000 } },
-      },
-      response: {
-        204: { type: "null" },
-        400: { type: "object", properties: { error: { type: "string" } } },
-        401: { type: "object", properties: { error: { type: "string" } } },
-      },
-    },
-  },
-  async (request, reply) => {
-    if (!config.METADATA_API_KEY || request.headers["x-api-key"] !== config.METADATA_API_KEY) {
-      return reply.code(401).send({ error: "metadata_write_unauthorized" });
-    }
-    const params = validateParams(metadataKeyParamSchema, request.params, reply);
-    if (!params) return;
-    const body = validateBody(metadataBodySchema, request.body, reply);
-    if (!body) return;
-    database
-      .prepare(
-        `INSERT INTO shipment_metadata (shipment_id, metadata_key, value, updated_at)
-         VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-         ON CONFLICT(shipment_id, metadata_key)
-         DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
-      )
-      .run(params.shipmentId, params.key, body.value);
-    return reply.code(204).send();
-  },
-);
+const KNOWN_EVENT_TYPES = new Set([
+  "dispute_escalated",
+  "milestone_confirmed",
+  "proof_submitted",
+  "dispute_resolved",
+  "shipment_completed",
+  "shipment_cancelled",
+]);
 
 app.get<{ Querystring: { types?: string } }>("/v1/api/stream", async (request, reply) => {
   const rawTypes = request.query.types;
@@ -576,7 +434,7 @@ app.get<{ Querystring: { types?: string } }>("/v1/api/stream", async (request, r
     "access-control-allow-origin": config.WEB_ORIGIN,
   });
   response.write(": connected\n\n");
-  const writeEvent = (event: ContractEvent) =>
+  const writeEvent = (event: EscalationEvent) =>
     response.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   streams.add(writeEvent);
   sseResponses.add(response);
@@ -724,54 +582,8 @@ async function scanEvents(): Promise<void> {
   if (pollRunning || !config.STELLAR_CONTRACT_ID) return;
   pollRunning = true;
   try {
-    const latestLedger = (await rpcServer.getLatestLedger()).sequence;
-    if (lastScannedLedger === undefined) {
-      lastScannedLedger = Math.max(1, latestLedger - 10);
-    }
-    const startLedger = Math.max(1, lastScannedLedger + 1);
-    if (startLedger > latestLedger) {
-      rpcHealthy = true;
-      return;
-    }
-    const filters = [{ type: "contract" as const, contractIds: [config.STELLAR_CONTRACT_ID] }];
-    let cursor: string | undefined;
-    let hasMore = true;
-    while (hasMore) {
-      const page = cursor
-        ? await rpcServer.getEvents({ cursor, filters, limit: 100 })
-        : await rpcServer.getEvents({ startLedger, endLedger: latestLedger, filters, limit: 100 });
-
-      for (const event of page.events) {
-        handleContractEvent(event);
-      }
-
-      hasMore = page.events.length === 100 && page.cursor !== cursor;
-      cursor = page.cursor;
-    }
-
-    lastScannedLedger = latestLedger;
+  await monitor.scan();
     rpcHealthy = true;
-    for (const event of response.events) {
-      const payload = decodeScVal(event.value) as Record<string, unknown>;
-      const shipmentId = String(payload.shipmentId ?? payload.shipment_id ?? "");
-      const escalation: EscalationEvent = {
-        id: event.id,
-        ledger: event.ledger,
-        type: "dispute_escalated",
-        shipmentId,
-        milestoneIndex: Number(payload.milestoneIndex ?? payload.milestone_index ?? 0),
-        openedLedger: Number(payload.openedLedger ?? payload.opened_ledger ?? event.ledger),
-        currentLedger: event.ledger,
-      };
-      database.prepare(`
-        INSERT OR IGNORE INTO contract_events (id, ledger, event_type, shipment_id, payload)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(escalation.id, escalation.ledger, escalation.type, shipmentId, JSON.stringify(escalation));
-      for (const stream of streams) {
-        stream(escalation);
-      }
-    }
-    lastScannedLedger = latest.sequence;
   } catch (error) {
     rpcHealthy = false;
     inc("rpc_errors_total");
@@ -779,6 +591,15 @@ async function scanEvents(): Promise<void> {
   } finally {
     pollRunning = false;
   }
+}
+
+if (config.STELLAR_CONTRACT_ID) {
+  const restored = rpcCursorStore.load();
+  if (restored?.ledgerCursor) {
+    app.log.info({ ledgerCursor: restored.ledgerCursor }, "Resuming Soroban RPC subscription from stored cursor");
+  }
+  pollTimer = setInterval(() => { void scanEvents(); }, config.POLL_INTERVAL_MS);
+  void scanEvents();
 }
 
 app.addHook("onClose", async () => {
