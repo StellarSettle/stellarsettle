@@ -70,10 +70,6 @@ function scU32(value: number) {
   return nativeToScVal(value, { type: "u32" });
 }
 
-function scU32(value: number) {
-  return nativeToScVal(value, { type: "u32" });
-}
-
 function scI128(value: string) {
   return nativeToScVal(BigInt(value), { type: "i128" });
 }
@@ -146,6 +142,11 @@ export function setActiveNetwork(name: NetworkName) {
 }
 export async function getShipmentSummary(address: string, shipmentId: string): Promise<Shipment> {
   return await readContract(address, "get_shipment_summary", scString(shipmentId)) as Shipment;
+}
+
+export async function getEscrowBalance(address: string, shipmentId: string): Promise<string> {
+  const balance = await readContract(address, "get_escrow_balance", scString(shipmentId));
+  return String(balance ?? "0");
 }
 
 export async function setShipmentMetadata(
