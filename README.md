@@ -3394,3 +3394,8 @@ stellar contract invoke --id <CONTRACT_ID> --source admin \
 ## Community Guidelines
 
 Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+
+## Handsoff notes
+
+<!-- handsoff-issue-251 -->
+- #251: Add a supplier payout batching view to the dashboard
