@@ -9,6 +9,7 @@
     "preview": "vite preview --host 0.0.0.0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:update": "vitest run -u",
     "size": "size-limit"
   },
   "size-limit": [
