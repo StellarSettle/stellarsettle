@@ -31,6 +31,7 @@ import {
   fileWarrantyClaim,
   getReputation,
   getShipmentDetail,
+  getEscrowBalance,
   getShipmentSummary,
   maxBatchCancel,
   raiseDispute,
@@ -52,6 +53,9 @@ import { amount, shortAddress } from "./lib/format";
 import { ShipmentMilestones } from "./components/ShipmentMilestones";
 import { TopUpForm } from "./components/TopUpForm";
 import { VaultPage } from "./components/VaultPage";
+import { EscrowBalanceHeader } from "./components/EscrowBalanceHeader";
+import { clearWalletSession, saveWalletSession } from "./lib/walletSession";
+import type { WalletId } from "./lib/wallets";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "./components/LanguageSwitcher";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -110,6 +114,9 @@ function App() {
   const [metadataValue, setMetadataValue] = useState("");
   const [showDispute, setShowDispute] = useState(false);
   const [showTopUp, setShowTopUp] = useState(false);
+  const [escrowBalance, setEscrowBalance] = useState<string | null>(null);
+  const [escrowLoading, setEscrowLoading] = useState(false);
+  const [showWalletMenu, setShowWalletMenu] = useState(false);
 
   useEffect(() => {
     const onPopState = () => setPath(currentPath());
@@ -219,26 +226,36 @@ function App() {
 
   async function connectWith(walletId: WalletId) {
     setShowWalletModal(false);
-    const syncPage = () => setPage(currentPage());
-    window.addEventListener("popstate", syncPage);
-    return () => window.removeEventListener("popstate", syncPage);
-  }, []);
-
-  function navigate(event: React.MouseEvent<HTMLAnchorElement>, path: string) {
-    event.preventDefault();
-    window.history.pushState(null, "", path);
-    setPage(currentPage());
-  }
-
-  async function handleConnect() {
     setError("");
     try {
-      setWallet(await connectWallet(walletId));
+      const connected = await connectWallet(walletId);
+      setWallet(connected);
+      saveWalletSession(connected.address);
       setNotice("Wallet connected");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : t("wallet.connectError"));
+      setError(cause instanceof Error ? cause.message : "Could not connect wallet.");
     }
   }
+
+  function disconnectWallet() {
+    clearWalletSession();
+    setWallet(null);
+    setShowWalletMenu(false);
+  }
+
+  useEffect(() => {
+    if (!wallet || !shipment) {
+      setEscrowBalance(null);
+      return;
+    }
+    let cancelled = false;
+    setEscrowLoading(true);
+    getEscrowBalance(wallet.address, shipment.id)
+      .then((value) => { if (!cancelled) setEscrowBalance(value); })
+      .catch(() => { if (!cancelled) setEscrowBalance(null); })
+      .finally(() => { if (!cancelled) setEscrowLoading(false); });
+    return () => { cancelled = true; };
+  }, [wallet, shipment]);
 
   function upsertRows(updated: Shipment[]) {
     setShipments((current) => {
@@ -491,7 +508,18 @@ function App() {
           <div className="profile-row">
             <span className="profile-avatar">{wallet ? wallet.address.slice(1, 2) : "S"}</span>
             <span><strong>{wallet ? shortAddress(wallet.address) : t("profile.guest")}</strong><small>{wallet ? t("profile.connected") : t("profile.connectPrompt")}</small></span>
-            <button className="icon-button" aria-label={t("profile.options")}><ChevronDown size={16} /></button>
+            {wallet && (
+              <div className="wallet-menu">
+                <button className="icon-button" aria-label="Account options" aria-expanded={showWalletMenu} onClick={() => setShowWalletMenu((open) => !open)}>
+                  <ChevronDown size={16} />
+                </button>
+                {showWalletMenu && (
+                  <button type="button" className="text-button" onClick={disconnectWallet}>
+                    Disconnect wallet
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </aside>
@@ -504,7 +532,7 @@ function App() {
             <ThemeToggle />
             <span className={`backend-indicator ${apiState}`}><span />API {apiState === "online" ? "connected" : apiState === "offline" ? "offline" : "checking"}</span>
             <button className="icon-button notification-button" aria-label="Notifications" onClick={() => { markNotificationsAsRead(); setSelectedEventType(null); }}><Bell size={17} />{unreadCount > 0 && <i />}</button>
-            <button className={`wallet-button ${wallet ? "connected" : ""}`} onClick={wallet ? () => setWallet(null) : handleConnect}>
+            <button className={`wallet-button ${wallet ? "connected" : ""}`} onClick={wallet ? disconnectWallet : handleConnect}>
               <WalletCards size={16} />{wallet ? shortAddress(wallet.address) : t("wallet.connect")}
             </button>
           </div>
@@ -571,7 +599,11 @@ function App() {
               </form>
               {!wallet && <div className="inline-callout"><WalletCards size={16} /><span>{t("wallet.callout")}</span><button onClick={handleConnect}>{t("wallet.calloutButton")}</button></div>}
               {shipment ? <div className="shipment-detail">
-                <div className="detail-topline"><div className="shipment-ref"><span className="shipment-icon"><FileSearch size={18} /></span><span><strong>{shipment.id}</strong><small>Created at ledger {shipment.created_at.toLocaleString()}</small></span></div><StatusPill status={status} /></div>
+                <div className="detail-topline">
+                  <div className="shipment-ref"><span className="shipment-icon"><FileSearch size={18} /></span><span><strong>{shipment.id}</strong><small>Created at ledger {shipment.created_at.toLocaleString()}</small></span></div>
+                  <EscrowBalanceHeader loading={escrowLoading} balance={escrowBalance} totalAmount={shipment.total_amount} />
+                  <StatusPill status={status} />
+                </div>
                 <div className="detail-grid">
                   <div><span>ESCROW TOTAL</span><strong>{amount(shipment.total_amount)} <small>units</small></strong></div>
                   <div><span>RELEASED</span><strong>{amount(released)} <small>units</small></strong></div>
