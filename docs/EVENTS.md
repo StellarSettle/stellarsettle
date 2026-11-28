@@ -1461,10 +1461,10 @@ There are 235 unique event names across 249 emitted schemas. The source line is 
 ### Schema
 
 - Topics: `( Symbol::new(&env, "milestones_rebalanced"), shipment_id.clone(), )`
-- Data shape: `(buyer, new_percents)`
-- Payload fields: `buyer`, `new_percents`
-- Emitting function(s): `rebalance_milestones` ([lib.rs:8234](../contracts/stellarsettle/src/lib.rs#L8234))
-- Sample decoded payload: `{"topics":["milestones_rebalanced","SHIP-2026-001"],"data":["G...EXAMPLE",1]}`
+- Data shape: `(buyer, old_percents, new_percents)`
+- Payload fields: `buyer`, `old_percents`, `new_percents`
+- Emitting function(s): `rebalance_milestones` ([lib.rs:8180](../contracts/stellarsettle/src/lib.rs#L8180))
+- Sample decoded payload: `{"topics":["milestones_rebalanced","SHIP-2026-001"],"data":["G...EXAMPLE",[25,50,25],[10,10,80]]}`
 
 ## `milestones_split`
 

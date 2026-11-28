@@ -390,6 +390,7 @@ stellar contract invoke --id $CONTRACT_ID -- \
 `submit_proof(caller, shipment_id, milestone_index, proof_hash, proof_type)`
 Supplier or logistics submits proof for a milestone (`proof_hash` is the payload reference, e.g. an IPFS CID; `proof_type` is a short symbol naming the content scheme, e.g. `ipfs`, `sha256`, or `url`).
 Milestone must be in `Pending` status. Moves status to `ProofSubmitted`.
+See [Invoice hash and proof format](docs/proof-format.md) for the hash encodings, length rules, and submission guidance.
 Invoice hash
 An invoice hash is an optional, immutable `BytesN<32>` commitment (e.g. a SHA-256 digest of an off-chain invoice PDF) that the supplier can attach to a milestone for audit and reconciliation. It does not move funds; it only records a cryptographic reference next to the milestone after proof is on-chain.
 Function Who When
@@ -2395,7 +2396,7 @@ Event name	Payload	When
 `dispute_evidence_submitted`	`(shipment_id)` topic, `(milestone_index, caller, evidence_hash, evidence_type)` data	Evidence submitted for a disputed milestone
 `escalation_threshold_set`	`threshold_ledgers`	Admin configured escalation threshold
 `shipment_cancelled`	`(shipment_id, refund_amount)`	Shipment cancelled
-`milestones_rebalanced`	`(buyer, new_percents)`	Buyer rebalanced milestone percentages
+`milestones_rebalanced`	`(shipment_id)` topic, `(buyer, old_percents, new_percents)` data	Buyer rebalanced milestone percentages
 `nft_hook_config_updated`	`(admin, enabled, ledger_sequence)`	Admin toggled the NFT mint hook via `set_nft_hook_enabled`
 `circuit_breaker_set`	`(limit, window_ledgers)`	Admin configured rate-limiting circuit breaker
 `long_hold_rebate_set`	`(threshold_ledgers, rebate_bps)`	Admin configured the long-hold escrow rebate
@@ -2419,7 +2420,7 @@ Event name Payload When
 `dispute_escalated` `(shipment_id)` topic, `(milestone_index, opened_ledger, current_ledger)` data Dispute open duration surpassed escalation threshold
 `escalation_threshold_set` `threshold_ledgers` Admin configured escalation threshold
 `shipment_cancelled` `(shipment_id, refund_amount)` Shipment cancelled
-`milestones_rebalanced` `(buyer, new_percents)` Buyer rebalanced milestone percentages
+`milestones_rebalanced` `(shipment_id)` topic, `(buyer, old_percents, new_percents)` data Buyer rebalanced milestone percentages
 `nft_hook_config_updated` `(admin, enabled, ledger_sequence)` Admin toggled the NFT mint hook via `set_nft_hook_enabled`
 `circuit_breaker_set` `(limit, window_ledgers)` Admin configured rate-limiting circuit breaker
 `nft_mint_hook` `(shipment_id)` topic, `(buyer, supplier, total_amount, ledger_sequence, metadata_hash)` data Final milestone completed while the NFT mint hook is enabled
@@ -3399,3 +3400,7 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
 <!-- handsoff-issue-251 -->
 - #251: Add a supplier payout batching view to the dashboard
+<!-- handsoff-issue-256 -->
+- #256: Add contract test for the full happy-path lifecycle
+<!-- handsoff-issue-252 -->
+- #252: Add contract code coverage reporting to CI

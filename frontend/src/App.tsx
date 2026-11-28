@@ -54,6 +54,7 @@ import { TopUpForm } from "./components/TopUpForm";
 import { VaultPage } from "./components/VaultPage";
 import { useTranslation } from "react-i18next";
 import { LanguageSwitcher } from "./components/LanguageSwitcher";
+import { ThemeToggle } from "./components/ThemeToggle";
 
 type Escalation = {
   id: string;
@@ -500,6 +501,7 @@ function App() {
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>{onVault ? "Buyer vault" : "Overview"}</strong></div>
           <div className="top-actions">
             <LanguageSwitcher />
+            <ThemeToggle />
             <span className={`backend-indicator ${apiState}`}><span />API {apiState === "online" ? "connected" : apiState === "offline" ? "offline" : "checking"}</span>
             <button className="icon-button notification-button" aria-label="Notifications" onClick={() => { markNotificationsAsRead(); setSelectedEventType(null); }}><Bell size={17} />{unreadCount > 0 && <i />}</button>
             <button className={`wallet-button ${wallet ? "connected" : ""}`} onClick={wallet ? () => setWallet(null) : handleConnect}>
