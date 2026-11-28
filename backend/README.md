@@ -2,6 +2,34 @@
 
 Node.js API and Soroban RPC event monitor for shipment escalation alerts, lifecycle events (`shipment_completed`, `shipment_cancelled`), and off-chain shipment metadata.
 
+## Architecture: event pipeline
+
+The backend event monitor pipeline flows from the Soroban ledger through the RPC event subscription, into the backend handler, persisted to the database, exposed via the REST API, and consumed by the frontend.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Ledger as Soroban Ledger
+    participant RPC as Stellar RPC
+    participant Monitor as Backend Event Monitor
+    participant DB as SQLite Database
+    participant API as REST API
+    participant FE as Frontend
+
+    Ledger->>RPC: Emit contract events (dispute_escalated, shipment_completed, shipment_cancelled)
+    Monitor->>RPC: getEvents (fromLedger, cursor, pagination)
+    RPC-->>Monitor: Contract events + latestLedger
+    Monitor->>Monitor: Validate & deduplicate events
+    Monitor->>DB: Persist events + advance checkpoint
+    Monitor->>API: Notify new events (SSE broadcast)
+    FE->>API: GET /v1/api/events (paginated)
+    API->>DB: Query stored events
+    DB-->>API: Event rows
+    API-->>FE: JSON events
+    FE->>API: GET /v1/api/stream (SSE)
+    API-->>FE: Live event stream
+```
+
 ## Requirements
 
 - Node.js **≥ 22.5**
@@ -17,7 +45,7 @@ npm install
 npm run dev        # ts-node watch mode
 ```
 
-Set `STELLAR_CONTRACT_ID` to enable the event monitor. By default, it scans recent contract events on Testnet and persists `dispute_escalated`, `shipment_completed`, and `shipment_cancelled` events as well as metadata in a local SQLite database. The API exposes `GET /api/health`, `GET /api/events`, `GET /api/stream` (SSE), shipment endpoints, and metadata read/write endpoints. Metadata writes are disabled until a non-empty `METADATA_API_KEY` is configured; keep that key on the server and never expose it in frontend variables.
+Set `STELLAR_CONTRACT_ID` to enable the event monitor. By default, it scans recent contract events on Testnet and persists `dispute_escalated`, `shipment_completed`, and `shipment_cancelled` events as well as metadata in a local SQLite database. The API exposes `GET /api/health`, `GET /metrics` (Prometheus format: request counts, latency histograms, event-poll success/failure), `GET /api/events`, `GET /api/stream` (SSE), shipment endpoints, and metadata read/write endpoints. Metadata writes are disabled until a non-empty `METADATA_API_KEY` is configured; keep that key on the server and never expose it in frontend variables.
 
 The event monitor resumes from a SQLite checkpoint on restart and automatically backfills missed, retained ledgers. This service does not sign or submit contract transactions; the connected wallet remains responsible for user-authorized actions.
 
@@ -59,20 +87,22 @@ To recover a reported gap, use an RPC provider that still retains the required r
 
 ## Database migrations
 
-Schema changes live in `migrations/` as `NNN_name.up.sql` / `NNN_name.down.sql` pairs. Applied migrations are tracked in the `schema_migrations` table of the database at `DATABASE_PATH`.
+The backend runs all pending schema migrations automatically at startup. Schema changes live in `migrations/` as `NNN_name.up.sql` / `NNN_name.down.sql` pairs. Applied migrations are tracked in the `schema_migrations` table of the database at `DATABASE_PATH`; the initial migration also adopts existing tables without deleting their data.
 
 ```sh
 npm run db:migrate    # apply all pending migrations
 npm run db:rollback   # revert the most recently applied migration
 ```
 
-To add a migration, create the next-numbered `.up.sql` and matching `.down.sql` file.
+To add a migration, create the next-numbered `.up.sql` and matching `.down.sql` file in `migrations/`. Put the forward schema change in `.up.sql` and its rollback in `.down.sql`; the next application startup will apply it. Run `npm run db:migrate` to apply pending migrations manually or `npm run db:rollback` to roll back the latest one.
 
 ## API Endpoints
 
 All API routes are versioned under `/v1` (e.g. `GET /v1/api/health`). Contract state reads are cached in memory for `CONTRACT_CACHE_TTL_MS` (default `5000`).
 
 ## Environment variables
+
+- **`WEB_ORIGIN`** — A single browser origin or a comma-separated list of origins allowed by CORS (default: `http://localhost:5173`).
 
 - **GET /v1/api/health** — Check service status, network, and event monitor state
 - **GET /v1/api/events** — Retrieve paginated `dispute_escalated`, `shipment_completed`, and `shipment_cancelled` events (query params: `after` ledger, `limit` max 100, optional `type` and `shipmentId`)
@@ -97,100 +127,6 @@ is not set.
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | `GET` | `/api/shipments` | None | List shipment IDs with cursor-based pagination. Proxies the contract's `list_shipments` function. |
-| `GET` | `/api/shipments/:id` | None | Retrieve the full `Shipment` struct for a single shipment by its ID. Returns `404` if not found. |
-| `GET` | `/api/shipments/:id/milestones` | None | Retrieve all milestones for a shipment, each annotated with their associated on-chain notes. Returns `404` if not found. |
+| `GET` | `/api/shipments/:id` | None | Retrieve the full `Shipment` struct for a single shipment by its ID. Retu
 
-**`GET /api/shipments` query parameters**
-
-| Param | Default | Description |
-|---|---|---|
-| `after` | `0` | Cursor returned by the previous page (the numeric index into the shipment list). |
-| `limit` | `50` | Maximum IDs to return per page. Capped at `100`. |
-
-**`GET /api/shipments` response**
-
-```json
-{
-  "shipments": ["SHIP-001", "SHIP-002"],
-  "nextCursor": 10
-}
-```
-
-`nextCursor` is `null` when the last page has been reached.
-
-**`GET /api/shipments/:id` response**
-
-Returns the full `Shipment` struct as returned by the contract's `get_shipment`
-function (buyer, supplier, logistics, arbiter, token, amounts, milestones,
-status, timestamps, dispute configuration, etc.).
-
-**`GET /api/shipments/:id/milestones` response**
-
-```json
-{
-  "milestones": [
-    {
-      "name": "Goods Dispatched",
-      "payment_percent": 25,
-      "proof_hash": "bafybeih...",
-      "status": "Confirmed",
-      "notes": []
-    }
-  ]
-}
-```
-
----
-
-- **GET /v1/api/shipments/:id/warranty** — Retrieve warranty status and any filed claim for a shipment
-  - Response: `{ warrantyEndLedger: number | null, balance: string | null, claim: WarrantyClaim | null }`
-  - `claim` is `null` when no warranty claim has been filed for the shipment
-  - Returns 404 if shipment ID not found
-  - Description: Reads `get_warranty_claim`, `get_warranty_balance`, and `get_warranty_end_ledger` via Soroban RPC; `warrantyEndLedger` is included for display
-
-### Metadata
-
-Off-chain key/value pairs attached to a shipment. Reads are public; writes
-require the `X-Api-Key` header matching `METADATA_API_KEY`.
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| `GET` | `/api/metadata/:shipmentId` | None | Retrieve all metadata entries for a shipment. Returns an empty object `{}` when none exist. |
-| `PUT` | `/api/metadata/:shipmentId/:key` | `X-Api-Key` | Store or overwrite a single metadata value. |
-
-### Templates
-
-- **GET /v1/api/templates** — List saved milestone templates from the contract
-  - Query params: `owner` (optional Stellar address to filter by owner), `nocache` (any value bypasses cache)
-  - Returns: `{ templates: MilestoneTemplate[] }` sorted in stable contract order
-  - Proxies contract's `list_milestone_templates` function
-
-### Deadlines
-
-- **GET /v1/api/deadlines/upcoming** — List milestones approaching their deadline
-  - Query params: `withinLedgers` (default 200), `nocache` (any value bypasses cache)
-  - Returns: `{ withinLedgers: number, milestones: MilestoneDeadline[] }` sorted by nearest deadline first
-  - Proxies contract's `get_upcoming_deadlines` and annotates results with `check_deadline_warning`
-
-### Admin Log
-
-- **GET /v1/api/admin-log** — Retrieve the on-chain admin action audit log (requires `X-API-Key` header)
-  - Query params: `action` (optional action type filter), `fromLedger` (optional), `toLedger` (optional), `nocache` (any value bypasses cache)
-  - Returns: `{ entries: AdminAction[], filters: { action, fromLedger, toLedger } }`
-  - Requires the same `METADATA_API_KEY` used for metadata writes
-  - Proxies contract's `get_admin_log` or `get_admin_log_filtered` depending on filters provided
-
-## Response Cache
-
-Read-only contract query endpoints (`/api/templates`, `/api/deadlines/upcoming`, `/api/admin-log`) use a
-short-lived in-memory cache to avoid redundant Soroban RPC calls:
-
-| Endpoint | Default TTL |
-|---|---|
-| `/api/templates` | 60 s |
-| `/api/deadlines/upcoming` | 30 s |
-| `/api/admin-log` | 15 s |
-
-Append `?nocache=1` to any of these endpoints to bypass the cache and force a fresh RPC call. This is
-useful for debugging or when you need the absolute latest on-chain state. The cache is process-local and
-is not shared across server restarts or multiple instances.
+/* … truncated 4479 chars — edit only what you need near the top … */

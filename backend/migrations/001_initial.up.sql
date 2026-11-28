@@ -14,3 +14,8 @@ CREATE TABLE IF NOT EXISTS shipment_metadata (
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (shipment_id, metadata_key)
 );
+CREATE TABLE IF NOT EXISTS event_scan_checkpoints (
+  scope TEXT PRIMARY KEY,
+  last_scanned_ledger INTEGER,
+  retention_gap TEXT
+);

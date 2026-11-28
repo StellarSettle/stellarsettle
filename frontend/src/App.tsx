@@ -56,6 +56,9 @@ import { VaultPage } from "./components/VaultPage";
 import { EscrowBalanceHeader } from "./components/EscrowBalanceHeader";
 import { clearWalletSession, saveWalletSession } from "./lib/walletSession";
 import type { WalletId } from "./lib/wallets";
+import { useTranslation } from "react-i18next";
+import { LanguageSwitcher } from "./components/LanguageSwitcher";
+import { ThemeToggle } from "./components/ThemeToggle";
 
 type Escalation = {
   id: string;
@@ -87,6 +90,7 @@ const eventLabels: Record<string, string> = {
 };
 
 function App() {
+  const { t } = useTranslation();
   const [path, setPath] = useState(currentPath);
   const [wallet, setWallet] = useState<Wallet | null>(null);
   const [shipmentId, setShipmentId] = useState(loadLastShipmentId);
@@ -524,6 +528,8 @@ function App() {
         <header className="topbar">
           <div className="breadcrumbs"><span>Workspace</span><span className="crumb-slash">/</span><strong>{onVault ? "Buyer vault" : "Overview"}</strong></div>
           <div className="top-actions">
+            <LanguageSwitcher />
+            <ThemeToggle />
             <span className={`backend-indicator ${apiState}`}><span />API {apiState === "online" ? "connected" : apiState === "offline" ? "offline" : "checking"}</span>
             <button className="icon-button notification-button" aria-label="Notifications" onClick={() => { markNotificationsAsRead(); setSelectedEventType(null); }}><Bell size={17} />{unreadCount > 0 && <i />}</button>
             <button className={`wallet-button ${wallet ? "connected" : ""}`} onClick={wallet ? disconnectWallet : handleConnect}>
@@ -591,7 +597,7 @@ function App() {
                 <label className="search-input-wrap"><Search size={17} /><input aria-label={t("lookup.inputLabel")} placeholder={t("lookup.placeholder")} value={shipmentId} onChange={(event) => setShipmentId(event.target.value)} /><kbd>↵</kbd></label>
                 <button className="primary-button" disabled={!wallet || loading || !shipmentId.trim()}>{loading ? <LoaderCircle className="spin" size={16} /> : <Search size={16} />}{loading ? t("lookup.loading") : t("lookup.submit")}</button>
               </form>
-              {!wallet && <div className="inline-callout"><WalletCards size={16} /><span>Connect a Stellar wallet to query public contract data and submit authorized transactions.</span><button onClick={handleConnect}>Connect</button></div>}
+              {!wallet && <div className="inline-callout"><WalletCards size={16} /><span>{t("wallet.callout")}</span><button onClick={handleConnect}>{t("wallet.calloutButton")}</button></div>}
               {shipment ? <div className="shipment-detail">
                 <div className="detail-topline">
                   <div className="shipment-ref"><span className="shipment-icon"><FileSearch size={18} /></span><span><strong>{shipment.id}</strong><small>Created at ledger {shipment.created_at.toLocaleString()}</small></span></div>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { EventMonitor, type ContractEvent } from "./eventMonitor.ts";
+import { migrateDatabase } from "./migrate.ts";
 import { createCheckpointStore } from "./scanCheckpoint.ts";
 
 type Options = ConstructorParameters<typeof EventMonitor>[0];
@@ -18,6 +19,7 @@ test("restart replays only events after the persisted cursor", async () => {
   } as unknown as Options["rpc"];
 
   const db = new DatabaseSync(":memory:");
+  migrateDatabase(db);
   const store = createCheckpointStore(db, "testnet", "contract");
   const processed: string[] = [];
   const make = () => new EventMonitor({

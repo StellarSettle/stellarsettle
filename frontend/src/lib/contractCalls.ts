@@ -32,24 +32,68 @@ export async function queryContract<T>(source: string, method: string, args: xdr
   return scValToNative(simulated.result.retval) as T;
 }
 
-export async function invokeContract(wallet: Wallet, method: string, args: xdr.ScVal[]): Promise<string> {
-  const account = await server.getAccount(wallet.address);
+// Error carrying a machine-readable code so the UI can render "Transaction failed (code X)".
+export class ContractCallError extends Error {
+  code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "ContractCallError";
+    this.code = code;
+  }
+}
+
+export interface InvokeCallbacks {
+  onSubmitted?: (hash: string) => void;
+  onConfirmed?: (ledger: number) => void;
+  onFailed?: (errorCode: string, message: string) => void;
+}
+
+function fail(callbacks: InvokeCallbacks | undefined, code: string, message: string): never {
+  callbacks?.onFailed?.(code, message);
+  throw new ContractCallError(code, message);
+}
+
+export async function invokeContract(
+  wallet: Wallet,
+  method: string,
+  args: xdr.ScVal[],
+  callbacks?: InvokeCallbacks,
+): Promise<string> {
+  let account;
+  try {
+    account = await server.getAccount(wallet.address);
+  } catch (error) {
+    fail(callbacks, "ACCOUNT_LOAD_FAILED", error instanceof Error ? error.message : String(error));
+  }
   const tx = new TransactionBuilder(account, { fee: BASE_FEE, networkPassphrase: passphrase })
     .addOperation(contract().call(method, ...args))
     .setTimeout(60)
     .build();
   const simulated = await server.simulateTransaction(tx);
-  if ("error" in simulated) throw new Error(simulated.error);
+  if ("error" in simulated) fail(callbacks, "SIMULATION_FAILED", simulated.error);
   const prepared = rpc.assembleTransaction(tx, simulated).build();
   const signed = await signTransaction(prepared.toXDR(), { networkPassphrase: passphrase, address: wallet.address });
-  if (signed.error) throw new Error(signed.error.message);
+  if (signed.error) fail(callbacks, "SIGNING_FAILED", signed.error.message);
   const submitted = await server.sendTransaction(TransactionBuilder.fromXDR(signed.signedTxXdr, passphrase));
-  if (submitted.status === "ERROR") throw new Error("The network rejected the signed transaction.");
+  if (submitted.status === "ERROR") {
+    fail(callbacks, "SUBMIT_REJECTED", "The network rejected the signed transaction.");
+  }
+  callbacks?.onSubmitted?.(submitted.hash);
   for (let attempt = 0; attempt < 30; attempt += 1) {
     const result = await server.getTransaction(submitted.hash);
-    if (result.status === "SUCCESS") return submitted.hash;
-    if (result.status === "FAILED") throw new Error(`The ${method} transaction failed on-chain.`);
+    if (result.status === "SUCCESS") {
+      callbacks?.onConfirmed?.(result.ledger);
+      return submitted.hash;
+    }
+    if (result.status === "FAILED") {
+      fail(callbacks, "ON_CHAIN_FAILED", `The ${method} transaction failed on-chain.`);
+    }
     await new Promise((resolve) => window.setTimeout(resolve, 1000));
   }
-  throw new Error(`Transaction ${submitted.hash} is still pending. Check it on Stellar Expert.`);
+  fail(
+    callbacks,
+    "PENDING_TIMEOUT",
+    `Transaction ${submitted.hash} is still pending. Check it on Stellar Expert.`,
+  );
 }

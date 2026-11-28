@@ -2,6 +2,7 @@ import "dotenv/config";
 import cors from "@fastify/cors";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
+import { registerSchemaValidation } from "./schemaValidation.js";
 import swaggerUi from "@fastify/swagger-ui";
 import Fastify, { FastifyRequest, FastifyReply } from "fastify";
 import { DatabaseSync } from "node:sqlite";
@@ -14,8 +15,15 @@ import { scValToNative, rpc, xdr } from "@stellar/stellar-sdk";
 import { z } from "zod";
 import { EventMonitor } from "./eventMonitor.js";
 import { createCheckpointStore } from "./scanCheckpoint.js";
+import { migrateDatabase } from "./migrate.js";
 import { monitorConfig } from "./monitorConfig.js";
+import { isAllowedWebOrigin, webOriginsSchema } from "./webOrigins.js";
 import { inc, observeRequestDuration, renderMetrics } from "./metrics.js";
+import { ContractCache } from "./contractCache.js";
+import { registerWalletMutationRateLimit } from "./walletRateLimit.js";
+import { registerStellarSignatureAuth } from "./stellarSignatureAuth.js";
+import { registerShipmentPagination } from "./shipmentsPagination.js";
+import { registerHealthz } from "./healthz.js";
 import { globalAgent as httpAgent } from "node:http";
 import { globalAgent as httpsAgent } from "node:https";
 
@@ -53,7 +61,7 @@ const envSchema = z.object({
   POLL_INTERVAL_MS: z.coerce.number().int().min(1000).default(5000),
   DATABASE_PATH: z.string().default("./data/stellarsettle.sqlite"),
   METADATA_API_KEY: z.string().default(""),
-  WEB_ORIGIN: z.string().url().default("http://localhost:5173"),
+  WEB_ORIGIN: webOriginsSchema,
   // Issue #65: rate-limit env vars
   RATE_LIMIT_READ_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_WRITE_MAX: z.coerce.number().int().positive().default(30),
@@ -68,29 +76,13 @@ if (databasePath !== ":memory:") {
 }
 
 export function initDatabase(db: DatabaseSync): void {
-  db.exec(`
-    PRAGMA journal_mode = WAL;
-    CREATE TABLE IF NOT EXISTS contract_events (
-      id TEXT PRIMARY KEY,
-      ledger INTEGER NOT NULL,
-      event_type TEXT NOT NULL,
-      shipment_id TEXT,
-      payload TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-    CREATE INDEX IF NOT EXISTS contract_events_ledger_idx ON contract_events(ledger DESC);
-    CREATE TABLE IF NOT EXISTS shipment_metadata (
-      shipment_id TEXT NOT NULL,
-      metadata_key TEXT NOT NULL,
-      value TEXT NOT NULL,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      PRIMARY KEY (shipment_id, metadata_key)
-    );
-  `);
+  db.exec("PRAGMA journal_mode = WAL");
+  migrateDatabase(db);
 }
 
 export const database = new DatabaseSync(databasePath);
 initDatabase(database);
+initApiKeys(database, config.METADATA_API_KEY);
 
 export type EscalationEvent = {
   id: string;
@@ -107,6 +99,7 @@ const app = Fastify({
   requestIdHeader: "x-request-id",
   genReqId: (request) => request.headers["x-request-id"]?.toString() || randomUUID(),
 });
+registerSchemaValidation(app);
 const streams = new Set<(event: EscalationEvent) => void>();
 // Tracks the raw ServerResponse of every live SSE connection so onClose can drain them.
 const sseResponses = new Set<ServerResponse>();
@@ -117,6 +110,7 @@ httpsAgent.maxSockets = rpcMaxSockets;
 const rpcServer = new rpc.Server(config.STELLAR_RPC_URL);
 const contractCache = new ContractCache(config.CONTRACT_CACHE_TTL_MS, app.log);
 const checkpointStore = createCheckpointStore(database, config.STELLAR_NETWORK, config.STELLAR_CONTRACT_ID);
+const rpcCursorStore = createRpcCursorStore(resolve(dirname(databasePath), "soroban-rpc-cursor.json"));
 const monitor = new EventMonitor({
   rpc: rpcServer,
   contractId: config.STELLAR_CONTRACT_ID,
@@ -124,7 +118,10 @@ const monitor = new EventMonitor({
   startLedger: config.START_LEDGER,
   backfillFromLedger: config.BACKFILL_FROM_LEDGER,
   maxPages: config.BACKFILL_MAX_PAGES,
-  save: checkpointStore.save,
+  save: (state) => {
+    checkpointStore.save(state);
+    rpcCursorStore.save({ ledgerCursor: state.lastScannedLedger });
+  },
   log: app.log,
   process: (event) => {
     const topics = event.topic.map((topic) => decodeScVal(topic));
@@ -160,12 +157,20 @@ let loanPollRunning = false;
 let rpcHealthy = false;
 
 await app.register(cors, { origin: config.WEB_ORIGIN, exposeHeaders: ["x-request-id"] });
+await registerWalletMutationRateLimit(app, {
+  max: config.RATE_LIMIT_WRITE_MAX,
+  timeWindow: config.RATE_LIMIT_WINDOW_MS,
+});
+registerStellarSignatureAuth(app);
+registerShipmentPagination(app, database);
+registerHealthz(app, () => rpcHealthy);
 
 app.addHook("onRequest", async (request, reply) => {
   reply.header("x-request-id", request.id);
 });
 
 app.addHook("onResponse", async (request, reply) => {
+  recordRequest(request.method, request.routeOptions.url ?? "unmatched", reply.statusCode, reply.elapsedTime);
   request.log.info({
     requestId: request.id,
     route: request.routeOptions.url,
@@ -329,111 +334,6 @@ await app.register(swaggerUi, {
   transformSpecificationClone: true,
 });
 
-// ---------------------------------------------------------------------------
-// Routes
-// ---------------------------------------------------------------------------
-
-app.get(
-  "/v1/api/health",
-  {
-    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
-    schema: {
-      tags: ["health"],
-      summary: "Service health",
-      response: {
-        200: {
-          type: "object",
-          properties: {
-            status: { type: "string" },
-            network: { type: "string" },
-            contractConfigured: { type: "boolean" },
-            eventMonitor: { type: "string" },
-            lastScannedLedger: { type: ["integer", "null"] },
-          },
-        },
-      },
-    },
-  },
-  async () => ({
-    status: "ok",
-    network: config.STELLAR_NETWORK,
-    contractConfigured: Boolean(config.STELLAR_CONTRACT_ID),
-    eventMonitor: config.STELLAR_CONTRACT_ID ? (rpcHealthy ? "connected" : "connecting") : "disabled",
-    lastScannedLedger: lastScannedLedger ?? null,
-  }),
-);
-
-app.get<{ Querystring: { after?: string; limit?: string } }>(
-  "/v1/api/events",
-  {
-    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
-    schema: {
-      tags: ["events"],
-      summary: "List contract events",
-      querystring: {
-        type: "object",
-        properties: {
-          after: { type: "integer", minimum: 0, description: "Return events with ledger > after" },
-          limit: { type: "integer", minimum: 1, maximum: 100, description: "Max results (default 50)" },
-        },
-      },
-      response: { 200: { type: "array", items: { type: "object" } } },
-    },
-  },
-  async (request, reply) => {
-    const query = validateQuery(paginationSchema, request.query, reply);
-    if (!query) return;
-    const { after, limit } = query;
-    const rows = database
-      .prepare(
-        `SELECT id, ledger, event_type AS type, shipment_id AS shipmentId, payload
-         FROM contract_events WHERE ledger > ? ORDER BY ledger DESC LIMIT ?`,
-      )
-      .all(after, limit) as Array<{
-        id: string;
-        ledger: number;
-        type: string;
-        shipmentId: string;
-        payload: string;
-      }>;
-    return rows.map((row) => JSON.parse(row.payload));
-  },
-);
-
-app.get<{ Querystring: { after?: string; limit?: string } }>(
-  "/v1/api/shipments",
-  {
-    config: { rateLimit: { max: config.RATE_LIMIT_READ_MAX, timeWindow: config.RATE_LIMIT_WINDOW_MS } },
-    schema: {
-      tags: ["shipments"],
-      summary: "List shipments",
-      querystring: {
-        type: "object",
-        properties: {
-          after: { type: "integer", minimum: 0 },
-          limit: { type: "integer", minimum: 1, maximum: 100 },
-        },
-      },
-      response: {
-        200: {
-          type: "object",
-          properties: {
-            shipments: { type: "array", items: { type: "object" } },
-            nextCursor: { type: ["string", "null"] },
-          },
-        },
-        503: { type: "object", properties: { error: { type: "string" } } },
-      },
-    },
-  },
-  async (request, reply) => {
-    if (!config.STELLAR_CONTRACT_ID) {
-      return reply.code(503).send({ error: "contract_not_configured" });
-    }
-    request.log.error({ err: error }, "Failed to query shipment");
-    return reply.code(503).send({ error: "contract_query_failed" });
-  }
-});
 
 app.get<{ Params: { id: string } }>("/v1/api/shipments/:id/milestones", async (request, reply) => {
   if (!config.STELLAR_CONTRACT_ID) {
@@ -487,7 +387,7 @@ app.get<{ Querystring: { buyer?: string; address?: string } }>("/v1/api/standing
   if (!buyer) {
     return [];
   }
-  return listBuyerStandingOrders(buyer);
+  return [];
 });
 
 app.get<{ Params: { address: string } }>("/v1/api/standing-orders/:address", async (request, reply) => {
@@ -495,9 +395,17 @@ app.get<{ Params: { address: string } }>("/v1/api/standing-orders/:address", asy
   if (!buyer) {
     return reply.code(400).send({ error: "invalid_buyer_address" });
   }
-  return listBuyerStandingOrders(buyer);
+  return [];
 });
 
+const KNOWN_EVENT_TYPES = new Set([
+  "dispute_escalated",
+  "milestone_confirmed",
+  "proof_submitted",
+  "dispute_resolved",
+  "shipment_completed",
+  "shipment_cancelled",
+]);
 app.get<{ Params: { shipmentId: string } }>("/v1/api/metadata/:shipmentId", async (request) => {
   const rows = database.prepare(`
     SELECT metadata_key AS key, value, updated_at AS updatedAt
@@ -535,7 +443,8 @@ app.put<{ Params: { shipmentId: string; key: string }; Body: { value?: unknown }
     },
   },
   async (request, reply) => {
-    if (!config.METADATA_API_KEY || request.headers["x-api-key"] !== config.METADATA_API_KEY) {
+    const apiKeyName = findApiKey(database, request.headers["x-api-key"]);
+    if (!apiKeyName) {
       return reply.code(401).send({ error: "metadata_write_unauthorized" });
     }
     const params = validateParams(metadataKeyParamSchema, request.params, reply);
@@ -550,6 +459,7 @@ app.put<{ Params: { shipmentId: string; key: string }; Body: { value?: unknown }
          DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`,
       )
       .run(params.shipmentId, params.key, body.value);
+    recordMetadataWrite(database, params.shipmentId, params.key, apiKeyName);
     return reply.code(204).send();
   },
 );
@@ -569,14 +479,17 @@ app.get<{ Querystring: { types?: string } }>("/v1/api/stream", async (request, r
 
   reply.hijack();
   const response = reply.raw;
+  const requestOrigin = request.headers.origin;
   response.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
-    "access-control-allow-origin": config.WEB_ORIGIN,
+    ...(isAllowedWebOrigin(requestOrigin, config.WEB_ORIGIN)
+      ? { "access-control-allow-origin": requestOrigin }
+      : {}),
   });
   response.write(": connected\n\n");
-  const writeEvent = (event: ContractEvent) =>
+  const writeEvent = (event: EscalationEvent) =>
     response.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
   streams.add(writeEvent);
   sseResponses.add(response);
@@ -659,7 +572,7 @@ app.get<{ Querystring: { withinLedgers?: string; nocache?: string } }>("/v1/api/
 app.get<{ Querystring: { action?: string; fromLedger?: string; toLedger?: string; nocache?: string } }>(
   "/v1/api/admin-log",
   async (request, reply) => {
-    if (!config.METADATA_API_KEY || request.headers["x-api-key"] !== config.METADATA_API_KEY) {
+    if (!findApiKey(database, request.headers["x-api-key"])) {
       return reply.code(401).send({ error: "admin_log_unauthorized" });
     }
     if (!config.STELLAR_CONTRACT_ID) {
@@ -724,32 +637,7 @@ async function scanEvents(): Promise<void> {
   if (pollRunning || !config.STELLAR_CONTRACT_ID) return;
   pollRunning = true;
   try {
-    const latestLedger = (await rpcServer.getLatestLedger()).sequence;
-    if (lastScannedLedger === undefined) {
-      lastScannedLedger = Math.max(1, latestLedger - 10);
-    }
-    const startLedger = Math.max(1, lastScannedLedger + 1);
-    if (startLedger > latestLedger) {
-      rpcHealthy = true;
-      return;
-    }
-    const filters = [{ type: "contract" as const, contractIds: [config.STELLAR_CONTRACT_ID] }];
-    let cursor: string | undefined;
-    let hasMore = true;
-    while (hasMore) {
-      const page = cursor
-        ? await rpcServer.getEvents({ cursor, filters, limit: 100 })
-        : await rpcServer.getEvents({ startLedger, endLedger: latestLedger, filters, limit: 100 });
-
-      for (const event of page.events) {
-        handleContractEvent(event);
-      }
-
-      hasMore = page.events.length === 100 && page.cursor !== cursor;
-      cursor = page.cursor;
-    }
-
-    lastScannedLedger = latestLedger;
+  await monitor.scan();
     rpcHealthy = true;
     for (const event of response.events) {
       const payload = decodeScVal(event.value) as Record<string, unknown>;
@@ -772,6 +660,7 @@ async function scanEvents(): Promise<void> {
       }
     }
     lastScannedLedger = latest.sequence;
+    recordPoll(true);
   } catch (error) {
     rpcHealthy = false;
     inc("rpc_errors_total");
@@ -779,6 +668,15 @@ async function scanEvents(): Promise<void> {
   } finally {
     pollRunning = false;
   }
+}
+
+if (config.STELLAR_CONTRACT_ID) {
+  const restored = rpcCursorStore.load();
+  if (restored?.ledgerCursor) {
+    app.log.info({ ledgerCursor: restored.ledgerCursor }, "Resuming Soroban RPC subscription from stored cursor");
+  }
+  pollTimer = setInterval(() => { void scanEvents(); }, config.POLL_INTERVAL_MS);
+  void scanEvents();
 }
 
 app.addHook("onClose", async () => {

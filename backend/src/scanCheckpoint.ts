@@ -2,11 +2,6 @@ import type { DatabaseSync } from "node:sqlite";
 import type { ScanCheckpoint } from "./eventMonitor.js";
 
 export function createCheckpointStore(database: DatabaseSync, network: string, contractId: string) {
-  database.exec(`CREATE TABLE IF NOT EXISTS event_scan_checkpoints (
-    scope TEXT PRIMARY KEY,
-    last_scanned_ledger INTEGER,
-    retention_gap TEXT
-  )`);
   // Provider URL is deliberately not part of the key: switching to a deeper
   // RPC for the same network/contract must preserve the recovery position.
   const scope = JSON.stringify([network, contractId]);

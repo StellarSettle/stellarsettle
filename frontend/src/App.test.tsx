@@ -48,6 +48,13 @@ describe("App", () => {
     window.history.pushState(null, "", "/");
   });
 
+  it("shows the theme toggle in the navbar", () => {
+    render(<App />);
+
+    const toggle = screen.getByRole("button", { name: /switch to (light|dark) theme/i });
+    expect(toggle.parentElement?.classList.contains("top-actions")).toBe(true);
+  });
+
   it("updates the escrow total after a successful top-up", async () => {
     vi.mocked(getShipmentSummary)
       .mockResolvedValueOnce(shipment)
