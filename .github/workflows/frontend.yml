@@ -40,7 +40,10 @@ jobs:
         run: npm run typecheck
 
       - name: Test
-        run: npm test
+        # Snapshot tests run in CI mode: Vitest fails when a checked-in
+        # snapshot differs instead of silently writing a new one.
+        # Update snapshots explicitly with `npm test -- -u` and commit them.
+        run: npm test -- --ci
 
       - name: Build
         run: npm run build

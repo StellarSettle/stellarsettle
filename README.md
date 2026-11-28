@@ -3398,5 +3398,7 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
 ## Handsoff notes
 
+<!-- handsoff-issue-256 -->
+- #256: Add contract test for the full happy-path lifecycle
 <!-- handsoff-issue-252 -->
 - #252: Add contract code coverage reporting to CI
