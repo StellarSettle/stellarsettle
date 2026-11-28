@@ -3398,6 +3398,8 @@ Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
 ## Handsoff notes
 
+<!-- handsoff-issue-251 -->
+- #251: Add a supplier payout batching view to the dashboard
 <!-- handsoff-issue-256 -->
 - #256: Add contract test for the full happy-path lifecycle
 <!-- handsoff-issue-252 -->
