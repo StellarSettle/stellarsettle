@@ -9,6 +9,7 @@ Thank you for your interest in contributing to StellarSettle! This guide covers 
 - [Code Style & Formatting](#code-style--formatting)
 - [Pre-commit Hooks](#pre-commit-hooks)
 - [Making Changes](#making-changes)
+- [Soroban Contract Feature Changes](#soroban-contract-feature-changes)
 - [Issue Labels & Triage](#issue-labels--triage)
 - [Troubleshooting](#troubleshooting)
 
@@ -275,6 +276,79 @@ Closes #123
    ```
 
 5. **Open a Pull Request** on GitHub
+
+---
+
+## Soroban Contract Feature Changes
+
+### Propose the specification first
+
+Before implementing a new Soroban contract feature, open a GitHub issue describing
+the proposed behavior and ask maintainers to agree on the scope. Include:
+
+- The problem and intended users, with concrete expected behavior and acceptance
+  criteria.
+- Any proposed contract entrypoints, inputs, outputs, events, and error cases.
+- The affected authorization rules, persistent state, and compatibility or
+  migration implications.
+- Relevant alternatives, assumptions, and security or resource concerns.
+
+Link the agreed specification issue from the implementation pull request. This
+gives maintainers and contributors a chance to resolve interface and security
+questions before on-chain behavior is added.
+
+### Branches and pull requests
+
+Start from the latest `main` and use the existing descriptive branch convention.
+For example, use `feature/<issue>-<short-description>` for a feature, or
+`fix/<issue>-<short-description>` for a fix. Keep contract changes focused and
+do not develop directly on `main`.
+
+Open the pull request against `main`. Describe the behavior and any changes to
+the public interface, authorization, stored state, events, or errors. Link the
+specification issue, include the validation commands and their results, and
+complete the security checklist below. Use `Closes #<issue>` when the pull
+request fully addresses its issue, and ensure the repository's required checks
+pass before merging.
+
+### Tests and validation
+
+Add contract tests alongside the affected contract tests under
+`contracts/stellarsettle/src` (or the corresponding contract crate). Cover the
+new behavior's successful path and relevant rejection paths, including
+authorization, state transitions, and input boundaries where applicable. Do
+not rely on a passing build alone; tests should exercise the changed behavior.
+
+Run the focused contract tests and, when practical, the complete contract
+workspace tests and the repository's contract formatting and lint checks:
+
+```bash
+cargo test -p stellarsettle
+cargo test --workspace
+make fmt-check-contracts
+make lint-contracts
+```
+
+The root `Makefile` also provides `make test-contracts` and `make ci`. The
+tracked workflows and `tarpaulin.toml` do not currently provide a verifiable
+numeric contract-coverage gate, so no percentage is required here; add tests
+for the changed behavior and do not claim a coverage threshold that the active
+checks do not enforce.
+
+### Contract security checklist
+
+- [ ] Mutating entrypoints require the intended caller authorization and enforce
+  the correct buyer, supplier, logistics, arbiter, or admin role.
+- [ ] Inputs, indexes, amounts, and configuration values are validated at
+  boundaries; arithmetic and payout calculations preserve escrow invariants.
+- [ ] State transitions cannot skip required checks or be repeated to release
+  funds twice; failure paths leave state and token balances consistent.
+- [ ] External contract calls, storage growth/TTL, and resource-heavy loops have
+  been considered for failure and denial-of-service risks.
+- [ ] Admin, pause, and upgrade paths (if affected) remain appropriately
+  restricted; emitted events do not expose secrets.
+- [ ] Tests cover unauthorized callers, invalid inputs, boundary values, and
+  relevant failure or adversarial cases.
 
 ---
 

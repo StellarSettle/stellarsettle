@@ -8224,8 +8224,10 @@ impl StellarSettleContract {
             panic!("milestone percentages must sum to 100");
         }
 
+        let mut old_percents = Vec::new(&env);
         for i in 0..new_percents.len() {
             let mut m = shipment.milestones.get(i).unwrap();
+            old_percents.push_back(m.payment_percent);
             m.payment_percent = new_percents.get(i).unwrap();
             shipment.milestones.set(i, m);
         }
@@ -8239,7 +8241,7 @@ impl StellarSettleContract {
                 Symbol::new(&env, "milestones_rebalanced"),
                 shipment_id.clone(),
             ),
-            (buyer, new_percents),
+            (buyer, old_percents, new_percents),
         );
     }
 
@@ -8327,6 +8329,11 @@ impl StellarSettleContract {
 
         if milestone_index as usize >= shipment.milestones.len() as usize {
             panic!("invalid milestone index");
+        }
+
+        let milestone = shipment.milestones.get(milestone_index).unwrap();
+        if milestone.status != MilestoneStatus::Pending {
+            panic!("milestone is not in pending status");
         }
 
         let advance_key = DataKey::AdvanceRequest(shipment_id.clone(), milestone_index);
@@ -16020,7 +16027,18 @@ impl StellarSettleContract {
         if payees.len() > 0 {
             let mut total: u32 = 0;
             for i in 0..payees.len() {
-                total += payees.get(i).unwrap().percent;
+                let payee = payees.get(i).unwrap();
+                if payee.percent == 0 {
+                    panic!("InvalidPayeePercentages");
+                }
+                for j in 0..i {
+                    if payees.get(j).unwrap().payee == payee.payee {
+                        panic!("DuplicatePayee");
+                    }
+                }
+                total = total
+                    .checked_add(payee.percent)
+                    .unwrap_or_else(|| panic!("InvalidPayeePercentages"));
             }
             if total != 100 {
                 panic!("InvalidPayeePercentages");
@@ -21723,6 +21741,7 @@ pub mod constants;
 mod storage;
 mod test_arbiter_pool;
 mod test_arbiter_slashing;
+mod test_advance_payment_lifecycle;
 mod test_cancellation_reason;
 mod test_common;
 mod test_correct_proof;
@@ -21790,6 +21809,8 @@ mod test_arbiter_repetition_guard;
 mod test_trade_proof;
 mod test_pause_notice;
 mod test_expiry_extension;
+#[path = "../tests/fuzz/milestone_payee_splits.rs"]
+mod test_milestone_payee_splits_fuzz;
 mod test_buyer_cap_collateral_merge;
 mod test_tier_max_value;
 mod test_valreb_mutual_preapproval;

@@ -1,20 +1,13 @@
 import { useEffect, useState } from "react";
-import { applyTheme, getInitialTheme, useTheme } from "../hooks/useTheme";
+import { applyTheme, getInitialTheme } from "../hooks/useTheme";
+import { ThemeToggle } from "./ThemeToggle";
 import "../theme.css";
 import "../responsive.css";
 import "../a11y.css";
 
 applyTheme(getInitialTheme());
 
-export function ThemeToggle() {
-  const { theme, toggle } = useTheme();
-  const next = theme === "dark" ? "light" : "dark";
-  return (
-    <button type="button" className="shell-fab theme-toggle" onClick={toggle} aria-label={`Switch to ${next} theme`} aria-pressed={theme === "dark"}>
-      {theme === "dark" ? "Light" : "Dark"}
-    </button>
-  );
-}
+export { ThemeToggle };
 
 function NavToggle() {
   const [open, setOpen] = useState(false);

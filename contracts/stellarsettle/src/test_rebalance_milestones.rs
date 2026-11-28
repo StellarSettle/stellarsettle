@@ -4,7 +4,9 @@ extern crate std;
 
 use super::*;
 use crate::test_common::{create_standard_shipment, setup};
-use soroban_sdk::{vec, String, Symbol};
+use soroban_sdk::{
+    testutils::Events as _, vec, Address, String, Symbol, TryFromVal, TryIntoVal,
+};
 
 fn sid(env: &soroban_sdk::Env, id: &str) -> String {
     String::from_str(env, id)
@@ -46,6 +48,47 @@ fn test_rebalance_before_any_proof_submission_succeeds() {
     assert_eq!(shipment.milestones.get(0).unwrap().payment_percent, 10);
     assert_eq!(shipment.milestones.get(1).unwrap().payment_percent, 10);
     assert_eq!(shipment.milestones.get(2).unwrap().payment_percent, 80);
+}
+
+#[test]
+fn test_rebalance_emits_event_with_old_and_new_weights() {
+    let t = setup();
+    let client = StellarSettleContractClient::new(&t.env, &t.contract_id);
+    let ship_id = sid(&t.env, "ship-rebalance-event");
+    create_standard_shipment(
+        &client,
+        &t.env,
+        &ship_id,
+        &t.buyer,
+        &t.supplier,
+        &t.logistics,
+        &t.arbiter,
+        &t.token_id,
+        1_000_000,
+    );
+
+    let new_percents = vec![&t.env, 10u32, 10u32, 80u32];
+    client.rebalance_milestones(&t.buyer, &ship_id, &new_percents);
+
+    let events = t.env.events().all();
+    assert_eq!(events.len(), 1, "rebalance should emit one contract event");
+    let (contract_id, topics, data) = events.get(0).unwrap();
+    assert_eq!(contract_id, t.contract_id);
+    assert_eq!(topics.len(), 2);
+    assert_eq!(
+        Symbol::try_from_val(&t.env, &topics.get(0).unwrap()).unwrap(),
+        Symbol::new(&t.env, "milestones_rebalanced")
+    );
+    assert_eq!(
+        String::try_from_val(&t.env, &topics.get(1).unwrap()).unwrap(),
+        ship_id
+    );
+
+    let (buyer, old_percents, emitted_new_percents): (Address, Vec<u32>, Vec<u32>) =
+        data.try_into_val(&t.env).unwrap();
+    assert_eq!(buyer, t.buyer);
+    assert_eq!(old_percents, vec![&t.env, 25u32, 50u32, 25u32]);
+    assert_eq!(emitted_new_percents, new_percents);
 }
 
 #[test]

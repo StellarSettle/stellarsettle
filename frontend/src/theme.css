@@ -2,7 +2,7 @@
 .shell-fab { min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); font-weight: 600; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
 .nav-toggle { display: none; }
 
-:root[data-theme="dark"] {
+:root.dark {
   color-scheme: dark;
   color: #e6ece8;
   background: #0f1512;
@@ -17,44 +17,168 @@
   --blue: #7fa9cf;
   --amber: #d6a54a;
 }
-:root[data-theme="dark"] body { background: var(--canvas); color: var(--ink); }
-:root[data-theme="dark"] .sidebar,
-:root[data-theme="dark"] .topbar,
-:root[data-theme="dark"] .metric,
-:root[data-theme="dark"] .panel,
-:root[data-theme="dark"] section,
-:root[data-theme="dark"] .table-panel { background: var(--panel); border-color: var(--line); color: var(--ink); }
-:root[data-theme="dark"] .main-area,
-:root[data-theme="dark"] .page-content { background: var(--canvas); }
-:root[data-theme="dark"] .network-card,
-:root[data-theme="dark"] .search-input-wrap,
-:root[data-theme="dark"] .metadata-form input,
-:root[data-theme="dark"] .inline-callout,
-:root[data-theme="dark"] th { background: #1e2823; border-color: var(--line); color: var(--ink); }
-:root[data-theme="dark"] .nav-item.active,
-:root[data-theme="dark"] .wallet-button.connected,
-:root[data-theme="dark"] .workspace-avatar,
-:root[data-theme="dark"] .profile-avatar,
-:root[data-theme="dark"] .green-icon,
-:root[data-theme="dark"] .shipment-icon,
-:root[data-theme="dark"] .table-file,
-:root[data-theme="dark"] .empty-icon { background: #213a30; color: var(--green-deep); border-color: #2c4a3d; }
-:root[data-theme="dark"] .blue-icon { background: #1f2f3d; }
-:root[data-theme="dark"] .coral-icon,
-:root[data-theme="dark"] .event-mark,
-:root[data-theme="dark"] .alert-count { background: #3a2420; color: var(--coral); }
-:root[data-theme="dark"] .amber-icon { background: #3a2f1a; }
-:root[data-theme="dark"] .nav-count,
-:root[data-theme="dark"] .subtle-icon,
-:root[data-theme="dark"] .icon-button:hover { background: #26312b; color: #b4beb8; }
-:root[data-theme="dark"] .status-pill { background: #213a30; color: #8bd8bb; }
-:root[data-theme="dark"] .status-pill.completed { background: #1f2f3d; color: #a9c8e6; }
-:root[data-theme="dark"] .status-pill.cancelled,
-:root[data-theme="dark"] .status-pill.expired { background: #3a2420; color: #f0a898; }
-:root[data-theme="dark"] .chain-badge { background: #213a30; color: #8bd8bb; }
-:root[data-theme="dark"] .toast-error { background: #3a2420; color: #f0a898; border-color: #5a352e; }
-:root[data-theme="dark"] .toast-success { background: #1b3328; color: #8bd8bb; border-color: #2c4a3d; }
-:root[data-theme="dark"] .meta-divider { background: var(--line); }
-:root[data-theme="dark"] small,
-:root[data-theme="dark"] .nav-label { color: var(--muted); }
-:root[data-theme="dark"] tr, :root[data-theme="dark"] td { border-color: var(--line); }
+:root.dark body { background: var(--canvas); color: var(--ink); }
+:root.dark .sidebar,
+:root.dark .topbar,
+:root.dark .metric,
+:root.dark .panel,
+:root.dark section,
+:root.dark .table-panel { background: var(--panel); border-color: var(--line); color: var(--ink); }
+:root.dark .main-area,
+:root.dark .page-content { background: var(--canvas); }
+:root.dark .network-card,
+:root.dark .search-input-wrap,
+:root.dark .metadata-form input,
+:root.dark .inline-callout,
+:root.dark th { background: #1e2823; border-color: var(--line); color: var(--ink); }
+:root.dark .nav-item.active,
+:root.dark .wallet-button.connected,
+:root.dark .workspace-avatar,
+:root.dark .profile-avatar,
+:root.dark .green-icon,
+:root.dark .shipment-icon,
+:root.dark .table-file,
+:root.dark .empty-icon { background: #213a30; color: var(--green-deep); border-color: #2c4a3d; }
+:root.dark .blue-icon { background: #1f2f3d; }
+:root.dark .coral-icon,
+:root.dark .event-mark,
+:root.dark .alert-count { background: #3a2420; color: var(--coral); }
+:root.dark .amber-icon { background: #3a2f1a; }
+:root.dark .nav-count,
+:root.dark .subtle-icon,
+:root.dark .icon-button:hover { background: #26312b; color: #b4beb8; }
+:root.dark .status-pill { background: #213a30; color: #8bd8bb; }
+:root.dark .status-pill.completed { background: #1f2f3d; color: #a9c8e6; }
+:root.dark .status-pill.cancelled,
+:root.dark .status-pill.expired { background: #3a2420; color: #f0a898; }
+:root.dark .chain-badge { background: #213a30; color: #8bd8bb; }
+:root.dark .toast-error { background: #3a2420; color: #f0a898; border-color: #5a352e; }
+:root.dark .toast-success { background: #1b3328; color: #8bd8bb; border-color: #2c4a3d; }
+:root.dark .meta-divider { background: var(--line); }
+:root.dark small,
+:root.dark .nav-label { color: var(--muted); }
+:root.dark tr, :root.dark td { border-color: var(--line); }
+:root.dark .theme-toggle:hover { background: #26312b; }
+:root.dark .workspace-switch,
+:root.dark .network-switcher,
+:root.dark .action-block,
+:root.dark .evidence-panel,
+:root.dark .split-proposal,
+:root.dark .bulk-toolbar,
+:root.dark .filter-chip,
+:root.dark .filter-button,
+:root.dark .secondary-button,
+:root.dark .workflow-form input,
+:root.dark .workflow-form select,
+:root.dark .standing-order-form input,
+:root.dark .proof-form input,
+:root.dark .proof-form select,
+:root.dark .cancel-form input,
+:root.dark .create-form input,
+:root.dark .create-form select,
+:root.dark .milestone-row input,
+:root.dark .field-label input,
+:root.dark .metadata-form select,
+:root.dark .loan-field input,
+:root.dark .wallet-modal,
+:root.dark .wallet-modal-option,
+:root.dark .toast-item {
+  background: #1e2823;
+  border-color: var(--line);
+  color: var(--ink);
+}
+:root.dark .event-row:hover,
+:root.dark .event-row.unread,
+:root.dark tr.row-selected td { background: #202c26; }
+:root.dark .cancelled-block,
+:root.dark .danger-button { background: #3a2420; border-color: #5a352e; color: #f0a898; }
+:root.dark .pool-paused { background: #3a2f1a; border-color: #665027; color: #e4c477; }
+:root.dark .loan-unconfigured code { background: #213a30; color: #b7d4c2; }
+:root.dark .panel-heading,
+:root.dark .panel-bottom-note,
+:root.dark .detail-grid,
+:root.dark .detail-grid > div + div,
+:root.dark .milestone-section,
+:root.dark .milestone-list,
+:root.dark .milestone-row,
+:root.dark .detail-grid,
+:root.dark .detail-grid + div,
+:root.dark .position-summary,
+:root.dark .position-summary > div + div,
+:root.dark .loan-form + .loan-form,
+:root.dark .borrower-forms .loan-form-repay,
+:root.dark .event-type-filters,
+:root.dark .event-row,
+:root.dark .activity-footer,
+:root.dark .vault-balance {
+  border-color: var(--line);
+}
+:root.dark .breadcrumbs strong,
+:root.dark .table td,
+:root.dark .nav-item,
+:root.dark .icon-button,
+:root.dark .metric-top,
+:root.dark h2,
+:root.dark .metric-value,
+:root.dark .detail-grid strong,
+:root.dark .split-remainder,
+:root.dark .table-id,
+:root.dark .shipment-ref strong,
+:root.dark .split-proposal-top strong,
+:root.dark .vault-balance strong,
+:root.dark .loan-form-heading strong,
+:root.dark .position-summary strong,
+:root.dark .repay-preview strong,
+:root.dark .refund-line strong,
+:root.dark .event-copy strong { color: var(--ink); }
+:root.dark .metric-foot,
+:root.dark .section-kicker,
+:root.dark .detail-grid span,
+:root.dark .detail-grid strong small,
+:root.dark .detail-footer,
+:root.dark .shipment-ref small,
+:root.dark .panel-bottom-note,
+:root.dark .sub-heading,
+:root.dark .sub-empty,
+:root.dark .milestone-line small,
+:root.dark .evidence-copy small,
+:root.dark .split-parts li,
+:root.dark .field-label,
+:root.dark .field > span,
+:root.dark .milestone-editor-head,
+:root.dark .action-hint,
+:root.dark .loan-form-heading,
+:root.dark .loan-field,
+:root.dark .position-summary span,
+:root.dark .oracle-note,
+:root.dark .repay-preview,
+:root.dark .market-addresses,
+:root.dark .heading-meta,
+:root.dark .backend-indicator,
+:root.dark .dispute-count,
+:root.dark .loan-form-note,
+:root.dark .muted,
+:root.dark .detail-footer code,
+:root.dark .table-empty,
+:root.dark .page-footer,
+:root.dark .workflow-empty,
+:root.dark .event-ledger { color: var(--muted); }
+:root.dark .search-input-wrap input,
+:root.dark .metadata-form input,
+:root.dark .metadata-form select,
+:root.dark .proof-form input,
+:root.dark .proof-form select,
+:root.dark .cancel-form input,
+:root.dark .create-form input,
+:root.dark .create-form select,
+:root.dark .milestone-row input,
+:root.dark .field-label input,
+:root.dark .workflow-form input,
+:root.dark .workflow-form select,
+:root.dark .standing-order-form input,
+:root.dark .loan-field input { color: var(--ink); }
+:root.dark input::placeholder { color: var(--muted); }
+:root.dark .toast-item { color: var(--ink); }
+:root.dark .evidence-list li,
+:root.dark .split-proposal-top { color: var(--green-deep); }
+:root.dark .market-addresses code { color: #b4beb8; }
