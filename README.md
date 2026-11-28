@@ -51,7 +51,9 @@ Deploying to Testnet
 Deploying to Mainnet
 Security Considerations
 See detailed security model: docs/SECURITY.md
+Project Status
 Roadmap
+Changelog
 Contributing
 Code of Conduct
 License
@@ -2751,6 +2753,86 @@ command. See [scripts/README.md](scripts/README.md) for all options.
 Deploying to Mainnet
 
 > ⚠️ Only deploy to Mainnet after thorough testing and ideally a security audit.
+>
+> **Before you deploy, work through the [Mainnet Deployment Checklist](docs/MAINNET_CHECKLIST.md).**
+> It covers configuration review, access control setup (multisig admin, roles,
+> timelock), and the post-deploy verification steps that must pass before the
+> contract is announced as live.
+======>>> REPLACE
+
+<<<<<<< SEARCH
+## Community Guidelines
+
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
+=======
+## Project Status
+
+A periodically updated summary of progress across the four work areas lives in
+[docs/STATUS.md](docs/STATUS.md). It lists each area (Contracts, Backend,
+Frontend, Loan Manager) with a rough status indicator, what is in progress, and
+what is blocked. Update it when a milestone in the roadmap below changes state.
+
+---
+
+## Roadmap
+
+The roadmap is sequenced by dependency rather than by date. Two hard
+dependencies drive the ordering:
+
+- **Contract hardening and an external audit must complete before any mainnet
+  deployment.** Nothing in the Backend or Frontend tracks can ship to mainnet
+  ahead of this.
+- **Backend API work lands before the corresponding Frontend dashboard
+  features.** The dashboard consumes the backend REST/SSE surface, so frontend
+  milestones that depend on new endpoints are scheduled after them.
+
+Status values: `Done`, `In progress`, `Planned`, `Blocked`. The authoritative
+list of open work is the issue tracker; the planning notes in
+[TODO.md](TODO.md), [IMPLEMENTATION_SUMMARY.md](IMPLEMENTATION_SUMMARY.md) and
+[NEW_MILESTONE_FEATURES.md](NEW_MILESTONE_FEATURES.md) describe the scope of
+individual items. See [docs/STATUS.md](docs/STATUS.md) for the current
+snapshot.
+
+### Near-term (next 1–2 milestones)
+
+| Area | Milestone | Key deliverables | Status |
+| --- | --- | --- | --- |
+| Contracts | Testnet feature freeze & hardening | Close remaining hardening issues from [TODO.md](TODO.md); full `cargo test --workspace` green; fuzz/property tests for escrow accounting; storage-schema migration verified via `migrate` | In progress |
+| Contracts | External security audit | Audit scope covering escrow, disputes, fees, and admin paths; findings triaged and fixed; re-test after fixes | Planned |
+| Contracts | Mainnet release candidate | Version bump in `contracts/stellarsettle/Cargo.toml`, `STORAGE_SCHEMA_VERSION` bump if layout changed, `CHANGELOG.md` entry, [Mainnet Deployment Checklist](docs/MAINNET_CHECKLIST.md) signed off | Planned |
+| Backend | Event monitor & API stabilization | Event poller covers all documented events in [docs/EVENTS.md](docs/EVENTS.md); REST endpoints documented in [docs/API.md](docs/API.md); SSE stream tested; metadata write endpoint behind `METADATA_API_KEY` | In progress |
+| Backend | Operational hardening | Reorg/replay handling, backfill tooling, structured logging and health checks, rate limiting on public endpoints | Planned |
+| Frontend | Dashboard parity with current contract | Shipment lookup, milestone confirmation, dispute queue (`/arbiter`), admin page (`/admin`), standing orders, translations, Playwright e2e in CI | In progress |
+| Frontend | Backend-driven features | Wire new backend endpoints as they land (see dependency above); surface `dispute_escalated` and other SSE events consistently | Planned |
+| Loan Manager | Core pool functionality | Deposit/withdraw, borrow/repay, interest accrual, liquidation path covered by tests; TypeScript bindings regenerated | In progress |
+
+### Longer-term
+
+| Area | Milestone | Key deliverables | Status |
+| --- | --- | --- | --- |
+| Contracts | Post-mainnet upgrade cadence | Multisig-governed upgrades (`propose_upgrade`/`approve_upgrade`), timelock for parameter changes, documented migration runbook | Planned |
+| Contracts | Advanced escrow features | Items tracked in [NEW_MILESTONE_FEATURES.md](NEW_MILESTONE_FEATURES.md) that are not yet implemented; each gated on audit and a changelog entry | Planned |
+| Backend | Multi-contract indexing | Index both `stellarsettle` and `loan_manager`; per-contract configuration; historical query API | Planned |
+| Backend | Analytics & reporting | Aggregated reputation, volume, and fee reporting endpoints for dashboards and compliance exports | Planned |
+| Frontend | Supplier & arbiter portals | Dedicated supplier payout/currency-preference views and a richer arbiter workspace beyond the current queue | Planned |
+| Frontend | Compliance views | Jurisdiction-tagged shipment reporting and blacklist/appeal workflows surfaced in the UI | Planned |
+| Loan Manager | Risk & governance | Interest-rate model review, collateral parameters, and admin governance aligned with the escrow contract's multisig model | Planned |
+
+---
+
+## Changelog
+
+Contract-affecting changes are recorded in [CHANGELOG.md](CHANGELOG.md), which
+follows [Keep a Changelog](https://keepachangelog.com/) conventions and tracks
+each released contract version alongside `version()` and
+`storage_schema_version()`. Update it in any PR that changes contract
+behaviour, storage layout, or the WASM interface.
+
+---
+
+## Community Guidelines
+
+Please read our [Code of Conduct](CODE_OF_CONDUCT.md) before participating.
 
 ```bash
 # Fund a mainnet account first (you need XLM for fees)

@@ -9,6 +9,8 @@ Thank you for your interest in contributing to StellarSettle! This guide covers 
 - [Code Style & Formatting](#code-style--formatting)
 - [Pre-commit Hooks](#pre-commit-hooks)
 - [Making Changes](#making-changes)
+- [Changelog](#changelog)
+- [Project Status](#project-status)
 - [Soroban Contract Feature Changes](#soroban-contract-feature-changes)
 - [Issue Labels & Triage](#issue-labels--triage)
 - [Troubleshooting](#troubleshooting)
@@ -276,6 +278,30 @@ Closes #123
    ```
 
 5. **Open a Pull Request** on GitHub
+
+### Changelog
+
+All notable changes are tracked in [`CHANGELOG.md`](CHANGELOG.md), which follows the [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) conventions.
+
+**Any PR that affects contract behavior must update `CHANGELOG.md`:**
+
+- Add an entry under the `[Unreleased]` section (or the version being prepared) describing the change.
+- If the change alters the contract's public interface, storage layout, or behavior, bump the on-chain version numbers consistently:
+  - `version()` — the contract version
+  - `storage_schema_version()` — the storage schema version (only when the storage layout changes)
+- Keep the changelog entry, `version()`, and `storage_schema_version()` in sync — reviewers will check this.
+
+### Release & Mainnet Work
+
+Before any mainnet deployment, work through [`docs/MAINNET_CHECKLIST.md`](docs/MAINNET_CHECKLIST.md). It covers configuration review, access control setup, and post-deploy verification.
+
+---
+
+## Project Status
+
+High-level progress across the backend, frontend, contracts, and devops work areas is tracked in [`docs/STATUS.md`](docs/STATUS.md).
+
+**Maintainers:** update `docs/STATUS.md` periodically (e.g. at the end of each milestone or release) so it reflects what is in progress, done, and blocked.
 
 ---
 
