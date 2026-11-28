@@ -10,8 +10,8 @@
 
 NETWORK        = testnet
 CONTRACT_NAME  = loan_manager
-WASM_PATH      = target/wasm32v1-none/release/$(CONTRACT_NAME).wasm
-WASM_OPT_PATH  = target/wasm32v1-none/release/$(CONTRACT_NAME).optimized.wasm
+WASM_PATH      = target/wasm32-unknown-unknown/release/$(CONTRACT_NAME).wasm
+WASM_OPT_PATH  = target/wasm32-unknown-unknown/release/$(CONTRACT_NAME).optimized.wasm
 
 .PHONY: test build optimize deploy-testnet clean fmt check fuzz
 
@@ -21,7 +21,7 @@ test:
 
 ## Build the contract to .wasm (release mode)
 build:
-	stellar contract build
+	cargo build --release --target wasm32-unknown-unknown
 
 ## Optimize the compiled .wasm for smaller deployment size
 optimize: build

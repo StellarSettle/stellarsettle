@@ -8,6 +8,9 @@ export type ToastItem = { id: number; kind: ToastKind; message: string };
 type ToastApi = {
   showToast: (kind: ToastKind, message: string, durationMs?: number) => number;
   dismissToast: (id: number) => void;
+  showTransactionSubmitted: (hash: string) => number;
+  showTransactionConfirmed: (ledger: number) => number;
+  showTransactionFailed: (errorCode: string | number, message: string) => number;
 };
 
 const ToastContext = createContext<ToastApi | null>(null);
@@ -27,15 +30,44 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     return id;
   }, [dismissToast]);
 
-  const api = useMemo(() => ({ showToast, dismissToast }), [showToast, dismissToast]);
+  const showTransactionSubmitted = useCallback(
+    (hash: string) => showToast("success", `Transaction submitted${hash ? `: ${hash}` : ""}`),
+    [showToast],
+  );
+
+  const showTransactionConfirmed = useCallback(
+    (ledger: number) => showToast("success", `Confirmed in ledger ${ledger}`),
+    [showToast],
+  );
+
+  const showTransactionFailed = useCallback(
+    (errorCode: string | number, message: string) =>
+      showToast("error", `Transaction failed (code ${errorCode}): ${message}`),
+    [showToast],
+  );
+
+  const api = useMemo(
+    () => ({ showToast, dismissToast, showTransactionSubmitted, showTransactionConfirmed, showTransactionFailed }),
+    [showToast, dismissToast, showTransactionSubmitted, showTransactionConfirmed, showTransactionFailed],
+  );
+
+  const successToasts = toasts.filter((toast) => toast.kind === "success");
+  const errorToasts = toasts.filter((toast) => toast.kind === "error");
 
   return (
     <ToastContext.Provider value={api}>
       {children}
       <div className="toast-stack" aria-label="Notifications">
-        {toasts.map((toast) => (
-          <Toast key={toast.id} toast={toast} onDismiss={() => dismissToast(toast.id)} />
-        ))}
+        <div className="toast-region" role="status" aria-live="polite" aria-atomic="false">
+          {successToasts.map((toast) => (
+            <Toast key={toast.id} toast={toast} onDismiss={() => dismissToast(toast.id)} />
+          ))}
+        </div>
+        <div className="toast-region" role="alert" aria-live="assertive" aria-atomic="false">
+          {errorToasts.map((toast) => (
+            <Toast key={toast.id} toast={toast} onDismiss={() => dismissToast(toast.id)} />
+          ))}
+        </div>
       </div>
     </ToastContext.Provider>
   );
@@ -43,10 +75,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export function Toast({ toast, onDismiss }: { toast: ToastItem; onDismiss: () => void }) {
   return (
-    <div className={`toast-item toast-item-${toast.kind}`} role={toast.kind === "error" ? "alert" : "status"}>
-      {toast.kind === "error" ? <X size={16} /> : <Check size={16} />}
+    <div className={`toast-item toast-item-${toast.kind}`}>
+      {toast.kind === "error" ? <X size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}
       <span className="toast-message">{toast.message}</span>
-      <button type="button" className="toast-dismiss" onClick={onDismiss} aria-label="Dismiss notification"><X size={15} /></button>
+      <button type="button" className="toast-dismiss" onClick={onDismiss} aria-label="Dismiss notification"><X size={15} aria-hidden="true" /></button>
     </div>
   );
 }

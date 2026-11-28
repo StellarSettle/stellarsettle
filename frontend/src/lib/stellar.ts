@@ -70,10 +70,6 @@ function scU32(value: number) {
   return nativeToScVal(value, { type: "u32" });
 }
 
-function scU32(value: number) {
-  return nativeToScVal(value, { type: "u32" });
-}
-
 function scI128(value: string) {
   return nativeToScVal(BigInt(value), { type: "i128" });
 }
@@ -146,6 +142,11 @@ export function setActiveNetwork(name: NetworkName) {
 }
 export async function getShipmentSummary(address: string, shipmentId: string): Promise<Shipment> {
   return await readContract(address, "get_shipment_summary", scString(shipmentId)) as Shipment;
+}
+
+export async function getEscrowBalance(address: string, shipmentId: string): Promise<string> {
+  const balance = await readContract(address, "get_escrow_balance", scString(shipmentId));
+  return String(balance ?? "0");
 }
 
 export async function setShipmentMetadata(
@@ -226,6 +227,53 @@ export async function submitDisputeEvidence(
     scString(evidenceHash),
     scSymbol(evidenceType),
   );
+}
+
+export async function hashEvidenceDescription(description: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(description);
+  const subtle = globalThis.crypto?.subtle || (typeof window !== "undefined" ? window.crypto?.subtle : undefined);
+  if (!subtle) {
+    throw new Error("WebCrypto is not supported in this environment.");
+  }
+  const hashBuffer = await subtle.digest("SHA-256", data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function raiseDispute(
+  wallet: Wallet,
+  shipmentId: string,
+  milestoneIndex: number,
+  evidenceHash?: string,
+): Promise<string> {
+  const txHash = await invokeContract(
+    wallet,
+    "dispute",
+    "raise_dispute",
+    scAddress(wallet.address),
+    scString(shipmentId),
+    scU32(milestoneIndex),
+  );
+  if (evidenceHash) {
+    try {
+      await submitDisputeEvidence(wallet, shipmentId, milestoneIndex, evidenceHash, "document");
+    } catch {
+      // Evidence submission is supplementary to opening the dispute
+    }
+  }
+  return txHash;
+}
+
+export async function openDisputeWithEvidence(
+  wallet: Wallet,
+  shipmentId: string,
+  milestoneIndex: number,
+  evidenceDescription: string,
+): Promise<{ txHash: string; evidenceHash: string }> {
+  const evidenceHash = await hashEvidenceDescription(evidenceDescription);
+  const txHash = await raiseDispute(wallet, shipmentId, milestoneIndex, evidenceHash);
+  return { txHash, evidenceHash };
 }
 
 // ---- Milestone split proposals (milestone_split_ui) ----

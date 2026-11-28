@@ -1,11 +1,11 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
+import es from "../public/locales/es/translation.json";
 
-// Add a locale by dropping `src/locales/<code>.json` next to en.json and
-// registering it below. Missing keys fall back to English.
 export const resources = {
-  en: { translation: en },
+  en: { translation: { ...en, language: { label: "Language", en: "English", es: "Español" }, nav: { ...en.nav, buyerVault: "Buyer vault" } } },
+  es: { translation: es },
 } as const;
 
 const requested = (import.meta.env.VITE_LOCALE as string | undefined) || navigator.language.split("-")[0];

@@ -7,8 +7,11 @@
     "shipments": "Shipments",
     "disputeActivity": "Dispute activity",
     "arbiter": "Arbiter queue",
-    "admin": "Admin"
+    "admin": "Admin",
+    "buyerVault": "Buyer vault",
+    "eventMonitor": "Event monitor"
   },
+  "language": { "label": "Language", "en": "English", "es": "Español" },
   "network": { "testnet": "Stellar Testnet", "mainnet": "Stellar Mainnet", "configured": "Network configured" },
   "docs": "Stellar docs",
   "profile": { "guest": "Guest session", "connected": "Wallet connected", "connectPrompt": "Connect to get started", "options": "Account options" },
